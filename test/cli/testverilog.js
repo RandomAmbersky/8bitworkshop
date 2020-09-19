@@ -2,8 +2,9 @@
 var assert = require('assert');
 var fs = require('fs');
 var wtu = require('./workertestutils.js');
+createTestDOM();
 
-var emu = require('gen/emu.js');
+var emu = require('gen/common/emu.js');
 var verilog = require('gen/platform/verilog.js');
 var VerilogPlatform = emu.PLATFORMS['verilog'];
 
@@ -21,7 +22,7 @@ function loadPlatform(msg) {
     platform.loadROM("ROM", msg.output);
     platform.loadROM("ROM", msg.output);
     verilog.vl_finished = verilog.vl_stopped = false;
-    for (var i=0; i<10000 && !(verilog.vl_finished||verilog.vl_stopped); i++) {
+    for (var i=0; i<100000 && !(verilog.vl_finished||verilog.vl_stopped); i++) {
       platform.tick();
     }
     assert.ok(!verilog.vl_stopped);
@@ -42,7 +43,7 @@ function loadPlatform(msg) {
 function testPerf(msg) {
   var platform = new VerilogPlatform();
   platform.loadROM("ROM", msg.output);
-  var niters = 2000000;
+  var niters = 5000000;
 
   console.time("before");
   for (var i=0; i<niters; i++)
@@ -126,7 +127,7 @@ describe('Verilog Worker', function() {
   //testVerilator('test/cli/verilog/t_order_clkinst.v');
   //testVerilator('test/cli/verilog/t_order_comboloop.v', ['BLKSEQ']);
   testVerilator('test/cli/verilog/t_order_first.v');
-  testVerilator('test/cli/verilog/t_order_loop_bad.v', ['BLKSEQ'], 10);
+  //testVerilator('test/cli/verilog/t_order_loop_bad.v', ['BLKSEQ'], 10);
   testVerilator('test/cli/verilog/t_order_multialways.v');
   testVerilator('test/cli/verilog/t_order_multidriven.v', ['UNDRIVEN']);
   //testVerilator('test/cli/verilog/t_order_quad.v');
@@ -154,6 +155,7 @@ describe('Verilog Worker', function() {
   testVerilator('test/cli/verilog/t_clk_condflop.v', ['BLKSEQ']);
 
   testVerilator('presets/verilog/hvsync_generator.v');
+  testVerilator('presets/verilog/cpu6502.v');
   /*
   it('should compile verilog example', function(done) {
     var csource = ab2str(fs.readFileSync('presets/verilog/hvsync_generator.v'));

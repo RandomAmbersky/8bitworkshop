@@ -1,3 +1,5 @@
+#ifndef _NESLIB_H
+#define _NESLIB_H
 /*
  (C) 2015 Alex Semenov (Shiru)
  (C) 2016 Lauri Kasanen
@@ -30,9 +32,14 @@
 //           unrle_vram renamed to vram_unrle, with adr argument removed
 //  060414 - many fixes and improvements, including sequental VRAM updates
 //  previous versions were created since mid-2011, there were many updates
+//  xxxx19 - updated by sehugg@8bitworkshop
 
 
-
+// define basic types for convenience
+typedef unsigned char byte;	// 8-bit unsigned
+typedef signed char sbyte;	// 8-bit signed
+typedef unsigned short word;	// 16-bit signed
+typedef enum { false, true } bool;	// boolean
 
 
 // set bg and spr palettes, data is 32 bytes array
@@ -117,6 +124,11 @@ unsigned char __fastcall__ oam_meta_spr(unsigned char x, unsigned char y,
 void __fastcall__ oam_hide_rest(unsigned char sprid);
 
 
+// initialize the FamiTone system
+void __fastcall__ famitone_init(void* music_data);
+
+// initialize the FamiTone SFX system
+void __fastcall__ sfx_init(void* sounds_data);
 
 // play a music in FamiTone format
 void __fastcall__ music_play(unsigned char song);
@@ -133,6 +145,8 @@ void __fastcall__ sfx_play(unsigned char sound, unsigned char channel);
 // play a DPCM sample, 1..63
 void __fastcall__ sample_play(unsigned char sample);
 
+// call from NMI once per frame
+void __fastcall__ famitone_update(void);
 
 
 // poll controller and return flags like PAD_LEFT etc, input is pad number (0 or 1)
@@ -147,7 +161,7 @@ unsigned char __fastcall__ pad_trigger(unsigned char pad);
 unsigned char __fastcall__ pad_state(unsigned char pad);
 
 
-// set scroll, including rhe top bits
+// set scroll, including the top bits
 // it is always applied at beginning of a TV frame, not at the function call
 void __fastcall__ scroll(unsigned int x, unsigned int y);
 
@@ -157,6 +171,11 @@ void __fastcall__ scroll(unsigned int x, unsigned int y);
 //          otherwise empty frames without split will be inserted, resulting in jumpy screen
 // warning: only X scroll could be changed in this version
 void __fastcall__ split(unsigned int x, unsigned int y);
+
+// set scroll after screen split invoked by the sprite 0 hit
+// sets both X and Y, but timing might be iffy depending
+// on exact sprite 0 position
+void __fastcall__ splitxy(unsigned int x, unsigned int y);
 
 
 // select current chr bank for sprites, 0..1
@@ -243,7 +262,7 @@ void __fastcall__ oam_clear_fast(void);
 void __fastcall__ oam_meta_spr_pal(unsigned char x,unsigned char y,unsigned char pal,const unsigned char *metasprite);
 void __fastcall__ oam_meta_spr_clip(signed int x,unsigned char y,const unsigned char *metasprite);
 
-// set NMI callback
+// set NMI/IRQ callback
 void __fastcall__ nmi_set_callback(void (*callback)(void));
 
 
@@ -268,6 +287,10 @@ void __fastcall__ nmi_set_callback(void (*callback)(void));
 #define MASK_BG			0x08
 #define MASK_EDGE_SPR		0x04
 #define MASK_EDGE_BG		0x02
+#define MASK_TINT_RED		0x20
+#define MASK_TINT_BLUE		0x40
+#define MASK_TINT_GREEN		0x80
+#define MASK_MONO		0x01
 
 #define NAMETABLE_A		0x2000
 #define NAMETABLE_B		0x2400
@@ -293,3 +316,22 @@ void __fastcall__ nmi_set_callback(void (*callback)(void));
 
 #define MSB(x)			(((x)>>8))
 #define LSB(x)			(((x)&0xff))
+
+// OAM buffer @ $200-$2FF
+
+typedef struct OAMSprite {
+  byte y;	// Y coordinate
+  byte name;	// tile index in name table
+  byte attr;	// attribute flags
+  byte x;	// X coordinate
+} OAMSprite;
+
+#define OAMBUF			((OAMSprite*) 0x200)
+
+// OAM offset for spr_pal and spr_clip
+
+extern byte oam_off;
+#pragma zpsym ("oam_off")
+
+#endif /* neslib.h */
+

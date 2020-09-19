@@ -1,4 +1,4 @@
-﻿
+
 //this example code shows how to put some text in nametable
 
 #include "neslib.h"

@@ -1,4 +1,9 @@
-﻿
+
+/*
+Demonstration game.
+For more information, see "Making Games for the NES".
+*/
+
 #include <stdlib.h>
 #include <string.h>
 #include <cv.h>
@@ -7,9 +12,8 @@
 #include "common.h"
 //#link "common.c"
 
-#ifdef CV_SMS
+// for SMS
 //#link "fonts.s"
-#endif
 
 #define XOFS 12 // sprite horiz. offset
 
@@ -32,7 +36,7 @@ const byte char_table[8][8] = {
 };
 
 const byte static_sprite_table[2][16*2] = {
-  /*{w:16,h:16,brev:1,remap:[4,0,1,2,3,5,6,7,8,9],count:4}*/ 
+  /*{w:16,h:16,brev:1,remap:[4,0,1,2,3,5,6,7,8,9],count:2}*/ 
   {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x02, 0x3F,
   0x35, 0x2A, 0x20, 0x20, 0x20, 0x20, 0x20, 0x3F,
@@ -592,14 +596,18 @@ void play_scene() {
 }
 
 void setup_graphics() {
+#ifndef CV_MSX
   cvu_memtovmemcpy(PATTERN, (void *)(font_bitmap_0 - '0'*8), 0x800);
+#endif
   cvu_memtovmemcpy(PATTERN+8*64, char_table, sizeof(char_table));
   cvu_memtovmemcpy(PATTERN+8*128, static_sprite_table, sizeof(static_sprite_table));
-  
+
+#ifndef CV_MSX
   cvu_vmemset(COLOR, 0x30|BGCOL, 8); // set color for chars 0-63
   cvu_vmemset(COLOR+8, 0x0|BGCOL, 32-8); // set chars 63-255
   cvu_vmemset(COLOR+16, 0xb0|BGCOL, 1); // set chars 128-128+8
-  
+#endif
+
   cvu_memtovmemcpy(SPRITE_PATTERNS, sprite_table, sizeof(sprite_table));
   flip_sprite_patterns(SPRITE_PATTERNS + 512, (const byte*)sprite_table, sizeof(sprite_table));
   flip_sprite_patterns(SPRITE_PATTERNS + 384, (const byte*)blimp_sprite_table, sizeof(blimp_sprite_table));

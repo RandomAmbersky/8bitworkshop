@@ -1,26 +1,49 @@
 
-TSC=./node_modules/typescript/bin/tsc
+TSC=./node_modules/typescript/bin/tsc --build
+TMP=./tmp/dist
 
-all: src/cpu/z80fast.js
+all:
+	patch -i meta/electron.diff -o electron.html
+	cp nanoasm/src/assembler.ts src/worker/
+	cp node_modules/jquery/dist/jquery.min.js ./jquery/
+	cp -r node_modules/bootstrap/dist/* ./bootstrap/
+	cp node_modules/bootstrap-tourist/*.css node_modules/bootstrap-tourist/*.js ./lib/
+	cp node_modules/clipboard/dist/clipboard.min.js ./lib/
+	cp node_modules/mousetrap/mousetrap*.min.js ./lib/
+	#cp node_modules/octokat/dist/octokat.js ./lib/
+	cp node_modules/split.js/dist/split.min.js ./lib/
+	cp node_modules/localforage/dist/localforage.min.js ./lib/
+	cp node_modules/jszip/dist/jszip.min.js ./lib/
+	cp node_modules/file-saver/dist/*.min.js ./lib/
+	cd jsnes && npm i
+	$(TSC) -v
+	$(TSC)
 
-src/cpu/z80.js: src/cpu/z80.coffee
-	coffee -c $<
+dist:
+	rm -fr $(TMP) && mkdir -p $(TMP)
+	git archive HEAD | tar x -C $(TMP)
+	cp -rp gen $(TMP)
+	rm -r $(TMP)/doc $(TMP)/meta $(TMP)/scripts $(TMP)/test* $(TMP)/tools $(TMP)/.[a-z]* $(TMP)/ts*.json
+	rm -f $(TMP)/javatari && mkdir -p $(TMP)/javatari && cp javatari.js/release/javatari/* $(TMP)/javatari/
+	tar cf - `cat electron.html | egrep "^<(script|link)" | egrep -o '"([^"]+).(js|css)"' | cut -d '"' -f2` | tar x -C $(TMP)
 
-src/cpu/z80fast.js: src/cpu/buildz80.js src/cpu/z80.js 
-	node $< > $@
+%.dist:
+	./node_modules/.bin/electron-packager $(TMP) --icon meta/icons/8bitworkshop-icon-1024.icns --out ./release --overwrite --platform $*
 
-check:
-	closure-compiler src/*.js src/cpu/*.js src/platform/*.js > /dev/null
+package: dist darwin.dist win32.dist linux.dist
 
-lint:
-	gjslint -r src
-
+meta/electron.diff: index.html electron.html
+	-diff -u index.html electron.html > $@
 
 web:
-	ifconfig | grep inet
-	python3 scripts/serveit.py 2>> http.out
+	(ip addr || ifconfig) | grep inet
+	python3 scripts/serveit.py 2>> /dev/null #http.out
 
 tsweb:
-	ifconfig | grep inet
+	(ip addr || ifconfig) | grep inet
 	$(TSC) -w &
-	python3 scripts/serveit.py 2>> http.out
+	python3 scripts/serveit.py 2>> /dev/null #http.out
+
+astrolibre.b64.txt: astrolibre.rom
+	lzg -9 $< | base64 -w 0 > $@
+

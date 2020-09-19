@@ -1,9 +1,9 @@
 "use strict";
 
-import { Platform, BaseZ80Platform, Base6502Platform  } from "../baseplatform";
-import { PLATFORMS, RAM, newAddressDecoder, padBytes, noise, setKeyboardFromMap, AnimationTimer, VectorVideo, Keys, makeKeycodeMap } from "../emu";
-import { hex } from "../util";
-import { MasterAudio, POKEYDeviceChannel } from "../audio";
+import { Platform, BaseZ80Platform, Base6502Platform  } from "../common/baseplatform";
+import { PLATFORMS, RAM, newAddressDecoder, padBytes, noise, setKeyboardFromMap, AnimationTimer, VectorVideo, Keys, makeKeycodeMap } from "../common/emu";
+import { hex } from "../common/util";
+import { MasterAudio, POKEYDeviceChannel, newPOKEYAudio } from "../common/audio";
 
 // http://www.computerarcheology.com/Arcade/Asteroids/DVG.html
 // http://arcarc.xmission.com/Tech/neilw_xy.txt
@@ -16,41 +16,30 @@ var VECTOR_PRESETS = [
 ]
 
 var ASTEROIDS_KEYCODE_MAP = makeKeycodeMap([
-  [Keys.VK_SHIFT, 3, 0xff],
-  [Keys.VK_SPACE, 4, 0xff],
-  [Keys.VK_5, 8, 0xff],
-  [Keys.VK_6, 9, 0xff],
-  [Keys.VK_7, 10, 0xff],
-  [Keys.VK_1, 11, 0xff],
-  [Keys.VK_2, 12, 0xff],
-  [Keys.VK_UP, 13, 0xff],
-  [Keys.VK_RIGHT, 14, 0xff],
-  [Keys.VK_LEFT, 15, 0xff],
+  [Keys.B,      3, 0xff],
+  [Keys.A,      4, 0xff],
+  [Keys.SELECT, 8, 0xff],
+  [Keys.VK_6,   9, 0xff],
+  [Keys.VK_7,   10, 0xff],
+  [Keys.START,  11, 0xff],
+  [Keys.P2_START, 12, 0xff],
+  [Keys.UP,     13, 0xff],
+  [Keys.RIGHT,  14, 0xff],
+  [Keys.LEFT,   15, 0xff],
 ]);
 
 var GRAVITAR_KEYCODE_MAP = makeKeycodeMap([
-  [Keys.VK_SHIFT, 1, -0x1],
-  [Keys.VK_SPACE, 1, -0x2],
-  [Keys.VK_5, 0, 0x2],
-  [Keys.VK_6, 0, 0x1],
-  [Keys.VK_1, 2, 0x20],
-  [Keys.VK_2, 2, 0x40],
-  [Keys.VK_UP, 1, -0x10],
-  [Keys.VK_DOWN, 1, -0x20],
-  [Keys.VK_RIGHT, 1, -0x4],
-  [Keys.VK_LEFT, 1, -0x8],
+  [Keys.B,      1, -0x1],
+  [Keys.A,      1, -0x2],
+  [Keys.VK_5,   0, 0x2],
+  [Keys.VK_6,   0, 0x1],
+  [Keys.START,  2, 0x20],
+  [Keys.P2_START, 2, 0x40],
+  [Keys.UP,     1, -0x10],
+  [Keys.DOWN,   1, -0x20],
+  [Keys.RIGHT,  1, -0x4],
+  [Keys.LEFT,   1, -0x8],
 ]);
-
-function newPOKEYAudio() {
-  var pokey1 = new POKEYDeviceChannel();
-  var pokey2 = new POKEYDeviceChannel();
-  var audio = new MasterAudio();
-  audio['pokey1'] = pokey1; // TODO: cheezy
-  audio['pokey2'] = pokey2;
-  audio.master.addChannel(pokey1);
-  audio.master.addChannel(pokey2);
-  return audio;
-}
 
 var AtariVectorPlatform = function(mainElement) {
   var XTAL = 12096000;
@@ -86,7 +75,7 @@ var AtariVectorPlatform = function(mainElement) {
         [0x2400, 0x2407, 0x7,    function(a) { return switches[a+8]; }],
         [0x4000, 0x4fff, 0xfff,  function(a) { return dvgram.mem[a]; }],
         [0x5000, 0x5fff, 0xfff,  function(a) { return vecrom[a]; }],
-        [0x6800, 0x7fff, 0,      function(a) { return rom[a - 0x6800]; }],
+        [0x6800, 0x7fff, 0,      function(a) { return rom ? rom[a - 0x6800] : 0; }],
       ], {gmask:0x7fff}),
 
       write: newAddressDecoder([
@@ -103,7 +92,7 @@ var AtariVectorPlatform = function(mainElement) {
     // create video/audio
     video = new VectorVideo(mainElement,1024,1024);
     dvg = new DVGBWStateMachine(bus, video, 0x4000);
-    audio = newPOKEYAudio();
+    audio = newPOKEYAudio(2);
     video.create();
     timer = new AnimationTimer(60, this.nextFrame.bind(this));
     setKeyboardFromMap(video, switches, ASTEROIDS_KEYCODE_MAP);
@@ -133,7 +122,7 @@ var AtariVectorPlatform = function(mainElement) {
 
   this.loadROM = function(title, data) {
     if(data.length != 0x2000) {
-      throw "ROM length must be == 0x2000";
+      throw Error("ROM length must be == 0x2000");
     }
     rom = data.slice(0,0x1800);
     vecrom = data.slice(0x1800,0x2000);
@@ -183,6 +172,11 @@ var AtariVectorPlatform = function(mainElement) {
   this.getCPUState = function() {
     return cpu.saveState();
   }
+  this.getMemoryMap = function() { return { main:[
+      {name:'Switches/POKEY I/O',start:0x7800,size:0x1000,type:'io'},
+      {name:'DVG I/O',start:0x8800,size:0x100,type:'io'},
+      {name:'EAROM',start:0x8900,size:0x100,type:'ram'},
+  ] } };
 }
 
 var AtariColorVectorPlatform = function(mainElement) {
@@ -199,6 +193,7 @@ var AtariColorVectorPlatform = function(mainElement) {
   var earom_offset, earom_data;
 
   this.__proto__ = new (Base6502Platform as any)();
+  //this.debugPCDelta = 0;
 
   this.getPresets = function() {
     return VECTOR_PRESETS;
@@ -229,12 +224,13 @@ var AtariColorVectorPlatform = function(mainElement) {
         //[0x7000, 0x7000, 0,      function(a) { /* EAROM read */ return 0; }],
         //[0x8940, 0x897f, 0x3f,   function(a) { /* EAROM data */ return 0; }],
         [0x8900, 0x8900, 0,      function(a) { /* EAROM read */ return earom_data; }],
-        [0x9000, 0xffff, 0xffff, function(a) { return rom[a - 0x9000]; }],
+        [0x9000, 0xffff, 0xffff, function(a) { return rom ? rom[a - 0x9000] : 0; }],
       ]),
 
       write: newAddressDecoder([
         [0x0,    0x7ff,  0x7ff,  function(a,v) { cpuram.mem[a] = v; }],
         [0x2000, 0x27ff, 0x7ff,  function(a,v) { dvgram.mem[a] = v; }],
+        [0x2800, 0x5fff, 0x7fff, function(a,v) { vecrom[a - 0x2800] = v; }], // TODO: remove (it's ROM!)
         [0x6000, 0x67ff, 0xf,    function(a,v) { audio.pokey1.setRegister(a, v); }],
         [0x6800, 0x6fff, 0xf,    function(a,v) { audio.pokey2.setRegister(a, v); }],
         [0x8800, 0x8800, 0,      function(a,v) { /* LEDs, etc */ }],
@@ -257,7 +253,7 @@ var AtariColorVectorPlatform = function(mainElement) {
     // create video/audio
     video = new VectorVideo(mainElement,1024,1024);
     dvg = new DVGColorStateMachine(bus, video, 0x2000);
-    audio = newPOKEYAudio();
+    audio = newPOKEYAudio(2);
     video.create();
     timer = new AnimationTimer(60, this.nextFrame.bind(this));
     setKeyboardFromMap(video, switches, GRAVITAR_KEYCODE_MAP);
@@ -286,7 +282,8 @@ var AtariColorVectorPlatform = function(mainElement) {
   }
 
   this.loadROM = function(title, data) {
-    rom = padBytes(data, 0x7000);
+    rom = data.slice(0, 0x7000);
+    vecrom = padBytes(data.slice(0x7000), 0x3800);
     this.reset();
   }
 
@@ -307,7 +304,9 @@ var AtariColorVectorPlatform = function(mainElement) {
   }
 
   this.loadState = function(state) {
+    this.unfixPC(state.c);
     cpu.loadState(state.c);
+    this.fixPC(state.c);
     cpuram.mem.set(state.b);
     dvgram.mem.set(state.db);
     switches.set(state.sw);
@@ -315,7 +314,7 @@ var AtariColorVectorPlatform = function(mainElement) {
   }
   this.saveState = function() {
     return {
-      c:cpu.saveState(),
+      c:this.getCPUState(),
       b:cpuram.mem.slice(0),
       db:dvgram.mem.slice(0),
       sw:switches.slice(0),
@@ -331,7 +330,7 @@ var AtariColorVectorPlatform = function(mainElement) {
     }
   }
   this.getCPUState = function() {
-    return cpu.saveState();
+    return this.fixPC(cpu.saveState());
   }
 }
 
@@ -374,7 +373,7 @@ var Z80ColorVectorPlatform = function(mainElement, proto) {
     bus = {
 
       read: newAddressDecoder([
-        [0x0,    0x7fff, 0,      function(a) { return rom[a]; }],
+        [0x0,    0x7fff, 0,      function(a) { return rom ? rom[a] : 0; }],
         [0x8000, 0x800f, 0xf,    function(a) { return switches[a]; }],
         [0x8100, 0x810f, 0xf,    function(a) { return mathram[a]; } ],
         [0xa000, 0xdfff, 0x3fff, function(a) { return dvgram.mem[a]; }],
@@ -395,11 +394,11 @@ var Z80ColorVectorPlatform = function(mainElement, proto) {
 
     };
     this.readAddress = bus.read;
-    cpu = this.newCPU(bus);
+    cpu = this.newCPU(bus, bus);
     // create video/audio
     video = new VectorVideo(mainElement,1024,1024);
     dvg = new DVGColorStateMachine(bus, video, 0xa000);
-    audio = newPOKEYAudio();
+    audio = newPOKEYAudio(2);
     video.create();
     timer = new AnimationTimer(60, this.nextFrame.bind(this));
     setKeyboardFromMap(video, switches, GRAVITAR_KEYCODE_MAP);
@@ -408,7 +407,7 @@ var Z80ColorVectorPlatform = function(mainElement, proto) {
   this.advance = (novideo) => {
       if (!novideo) video.clear();
       this.runCPU(cpu, cpuCyclesPerFrame);
-      cpu.requestInterrupt();
+      cpu.interrupt(0xff); // RST 0x38
       switches[0xf] = (switches[0xf] + 1) & 0x3;
       if (--switches[0xe] <= 0) {
         console.log("WATCHDOG FIRED"); // TODO: alert on video
@@ -464,6 +463,12 @@ var Z80ColorVectorPlatform = function(mainElement, proto) {
   this.getCPUState = function() {
     return cpu.saveState();
   }
+  this.getMemoryMap = function() { return { main:[
+      {name:'Switches/POKEY I/O',start:0x8000,size:0x100,type:'io'},
+      {name:'Math Box I/O',start:0x8100,size:0x100,type:'io'},
+      {name:'DVG I/O',start:0x8800,size:0x100,type:'io'},
+      {name:'DVG RAM',start:0xa000,size:0x4000,type:'ram'},
+  ] } };
 }
 
 // DIGITAL VIDEO GENERATOR

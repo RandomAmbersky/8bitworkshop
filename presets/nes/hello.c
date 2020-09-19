@@ -1,48 +1,32 @@
 
-#include <nes.h>
+/*
+A simple "hello world" example.
+Set the screen background color and palette colors.
+Then write a message to the nametable.
+Finally, turn on the PPU to display video.
+*/
 
-const unsigned char TEXT[]="Hello PPU!!!!";
+#include "neslib.h"
 
-const unsigned char PALETTE[]={0x1, 0x00, 0x10, 0x20}; // blue, gray, lt gray, white
+// link the pattern table into CHR ROM
+//#link "chr_generic.s"
 
-void main (void) {
-  unsigned char index; // used in 'for' loops
+// main function, run after console reset
+void main(void) {
 
-  // if we've just powered on,
-  // wait for PPU to warm-up
-  waitvsync();
-  waitvsync();
+  // set palette colors
+  pal_col(0,0x02);	// set screen to dark blue
+  pal_col(1,0x14);	// fuchsia
+  pal_col(2,0x20);	// grey
+  pal_col(3,0x30);	// white
 
-  // turn off screen
-  PPU.control = 0x0; // NMI off
-  PPU.mask = 0x0; // screen off
+  // write text to name table
+  vram_adr(NTADR_A(2,2));		// set address
+  vram_write("HELLO, WORLD!", 13);	// write bytes to video RAM
 
-  // load the palette
-  // set PPU address to 0x3f00
-  PPU.vram.address = 0x3f;
-  PPU.vram.address = 0x00;
-  for (index = 0; index < sizeof(PALETTE); index++) {
-    PPU.vram.data = PALETTE[index];
-  }
-
-  // load the text into VRAM
-  // set PPU address to 0x21c9
-  PPU.vram.address = 0x21;
-  PPU.vram.address = 0xc9;
-  for (index = 0; index < sizeof(TEXT); index++) {
-    PPU.vram.data = TEXT[index];
-  }
-
-  // reset the scroll position to 0
-  PPU.scroll = 0;
-  PPU.scroll = 0;
-  // reset the PPU address to 0x2000 (frame start)
-  PPU.vram.address = 0x20;
-  PPU.vram.address = 0x00;
- 
-  // turn on the screen
-  PPU.mask = 0x1e;
+  // enable PPU rendering (turn on screen)
+  ppu_on_all();
 
   // infinite loop
-  while (1);
+  while (1) ;
 }

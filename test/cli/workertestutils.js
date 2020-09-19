@@ -7,6 +7,16 @@ var worker = {};
 
 global.window = global;
 global.exports = {};
+global.self = global;
+global.location = {href:'.'};
+global.require = (modname) => {
+  console.log("REQUIRE",modname);
+  if (modname == 'path')
+    return require(modname);
+};
+
+global.btoa = require('btoa');
+global.atob = require('atob');
 
 global.includeInThisContext = function(path) {
   var code = fs.readFileSync(path);
@@ -27,7 +37,7 @@ function Blob(blob) {
     //console.log(new Error().stack);
     return b;
   }
-  this.asArrayBuffer = function() {
+  this.arrayBuffer = this.asArrayBuffer = function() {
     var buf = new ArrayBuffer(blob.length);
     var arr = new Uint8Array(buf);
     for (var i=0; i<blob.length; i++)
@@ -38,6 +48,7 @@ function Blob(blob) {
 
 global.XMLHttpRequest = function() {
     this.open = function(a,b,c) {
+        //console.log(':::xml',a,'src/worker/'+b,c,this.responseType);
         if (this.responseType == 'json') {
             var txt = fs.readFileSync('src/worker/'+b);
             this.response = JSON.parse(txt);
@@ -48,6 +59,8 @@ global.XMLHttpRequest = function() {
             var data = fs.readFileSync('src/worker/'+b, {encoding:'binary'});
             this.response = new Blob(data).asArrayBuffer();
         }
+        this.status = this.response ? 200 : 404;
+        //console.log(':::xml',this.response.length);
     }
     this.send = function() { }
 }
@@ -65,4 +78,64 @@ includeInThisContext("gen/worker/workermain.js");
 
 global.ab2str = function(buf) {
   return String.fromCharCode.apply(null, new Uint16Array(buf));
+}
+
+global.localItems = {};
+global.localMods = 0;
+
+global.localStorage = {
+ clear: function() {
+  localItems = {};
+  localMods = 0;
+  this.length = 0;
+ },
+ getItem: function(k) {
+  console.log('get',k);
+  return localItems[k];
+ },
+ setItem: function(k,v) {
+  console.log('set',k,v.length<100?v:v.length);
+  if (!localItems[k]) this.length++;
+  localItems[k] = v;
+  localMods++;
+ },
+ removeItem: function(k) {
+  if (localItems[k]) {
+   this.length--;
+   delete localItems[k];
+   localMods++;
+  }
+ },
+ length: 0,
+ key: function(i) {
+  var keys = [];
+  for (var k in localItems)
+   keys.push(k);
+  console.log(i,keys[i]);
+  return keys[i];
+ }
+};
+
+global.fetch = function(path) {
+  return new Promise( (resolve, reject) => {
+    try {
+      var bin = fs.readFileSync(path, {encoding:'binary'});
+      var response = new Blob(bin);
+      resolve(response);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+global.createTestDOM = function() {
+  const jsdom = require('jsdom');
+  const { JSDOM } = jsdom;
+  const dom = new JSDOM(`<!DOCTYPE html><div id="emulator"><div id="javatari-screen"></div></div>`);
+  global.window = dom.window;
+  global.document = dom.window.document;
+  global['$'] = require("jquery/jquery.min.js");
+  dom.window.Audio = null;
+  global.Image = function() { }
+  return dom;
 }

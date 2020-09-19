@@ -1,10 +1,10 @@
-"use strict";
 
-import { Platform, BasePlatform } from "../baseplatform";
-import { PLATFORMS, setKeyboardFromMap, AnimationTimer, RasterVideo, Keys, makeKeycodeMap } from "../emu";
-import { SampleAudio } from "../audio";
-import { safe_extend, clamp } from "../util";
-import { WaveformView, WaveformProvider, WaveformMeta } from "../waveform";
+import { Platform, BasePlatform } from "../common/baseplatform";
+import { PLATFORMS, setKeyboardFromMap, AnimationTimer, RasterVideo, Keys, makeKeycodeMap, getMousePos, KeyFlags } from "../common/emu";
+import { SampleAudio } from "../common/audio";
+import { safe_extend, clamp, byteArrayToString } from "../common/util";
+import { WaveformView, WaveformProvider, WaveformMeta } from "../ide/waveform";
+import { setFrameRateUI, current_project } from "../ide/ui";
 
 declare var Split;
 
@@ -41,22 +41,22 @@ var VERILOG_PRESETS = [
 ];
 
 var VERILOG_KEYCODE_MAP = makeKeycodeMap([
-  [Keys.VK_LEFT, 0, 0x1],
-  [Keys.VK_RIGHT, 0, 0x2],
-  [Keys.VK_UP, 0, 0x4],
-  [Keys.VK_DOWN, 0, 0x8],
-  [Keys.VK_SPACE, 0, 0x10],
-  [Keys.VK_SHIFT, 0, 0x20],
-  [Keys.VK_A, 1, 0x1],
-  [Keys.VK_D, 1, 0x2],
-  [Keys.VK_W, 1, 0x4],
-  [Keys.VK_S, 1, 0x8],
-  [Keys.VK_Z, 1, 0x10],
-  [Keys.VK_X, 1, 0x20],
-  [Keys.VK_1, 2, 0x1],
-  [Keys.VK_2, 2, 0x2],
-  [Keys.VK_5, 2, 0x4],
-  [Keys.VK_6, 2, 0x8],
+  [Keys.LEFT,  0, 0x1],
+  [Keys.RIGHT, 0, 0x2],
+  [Keys.UP,    0, 0x4],
+  [Keys.DOWN,  0, 0x8],
+  [Keys.A,     0, 0x10],
+  [Keys.B,     0, 0x20],
+  [Keys.P2_LEFT,  1, 0x1],
+  [Keys.P2_RIGHT, 1, 0x2],
+  [Keys.P2_UP,    1, 0x4],
+  [Keys.P2_DOWN,  1, 0x8],
+  [Keys.P2_A,     1, 0x10],
+  [Keys.P2_B,     1, 0x20],
+  [Keys.START,     2, 0x1],
+  [Keys.P2_START,  2, 0x2],
+  [Keys.SELECT,    2, 0x4],
+  [Keys.P2_SELECT, 2, 0x8],
   [Keys.VK_7, 2, 0x10],
 ]);
 
@@ -66,7 +66,7 @@ export var vl_finished = false;
 export var vl_stopped = false;
 
 export function VL_UL(x) { return x|0; }
-export function VL_ULL(x) { return x|0; }
+//export function VL_ULL(x) { return x|0; }
 export function VL_TIME_Q() { return (new Date().getTime())|0; }
 
   /// Return true if data[bit] set
@@ -94,11 +94,23 @@ export function VL_LTES_III(x,lbits,y,lhs,rhs) {
 export function VL_GTES_III(x,lbits,y,lhs,rhs) {
     return (VL_EXTENDS_II(x,lbits,lhs) >= VL_EXTENDS_II(x,lbits,rhs)) ? 1 : 0; }
 
+export function VL_DIV_III(lbits,lhs,rhs) {
+    return (((rhs)==0)?0:(lhs)/(rhs)); }
+
 export function VL_MODDIV_III(lbits,lhs,rhs) {
     return (((rhs)==0)?0:(lhs)%(rhs)); }
 
+export function VL_DIVS_III(lbits,lhs,rhs) {
+  var lhs_signed = VL_EXTENDS_II(32, lbits, lhs);
+  var  rhs_signed = VL_EXTENDS_II(32, lbits, rhs);
+  return (((rhs_signed)==0)?0:(lhs_signed)/(rhs_signed));
+}
+
 export function VL_MODDIVS_III(lbits,lhs,rhs) {
-    return (((rhs)==0)?0:(lhs)%(rhs)); }
+  var lhs_signed = VL_EXTENDS_II(32, lbits, lhs);
+  var  rhs_signed = VL_EXTENDS_II(32, lbits, rhs);
+  return (((rhs_signed)==0)?0:(lhs_signed)%(rhs_signed));
+}
 
 export function VL_REDXOR_32(r) {
     r=(r^(r>>1)); r=(r^(r>>2)); r=(r^(r>>4)); r=(r^(r>>8)); r=(r^(r>>16));
@@ -119,7 +131,34 @@ export function vl_stop(filename,lineno,hier) {
 export function VL_RAND_RESET_I(bits) { return 0 | Math.floor(Math.random() * (1<<bits)); }
 
 export function VL_RANDOM_I(bits) { return 0 | Math.floor(Math.random() * (1<<bits)); }
-  
+
+export function VL_READMEM_Q(ishex,width,depth,array_lsb,fnwords,filename,memp,start,end) {
+  VL_READMEM_W(ishex,width,depth,array_lsb,fnwords,filename,memp,start,end);
+}
+export function VL_READMEM_W(ishex,width,depth,array_lsb,fnwords,filename,memp,start,end) {
+  // parse filename from 32-bit values into characters
+  var barr = [];
+  for (var i=0; i<filename.length; i++) {
+    barr.push((filename[i] >> 0)  & 0xff);
+    barr.push((filename[i] >> 8)  & 0xff);
+    barr.push((filename[i] >> 16) & 0xff);
+    barr.push((filename[i] >> 24) & 0xff);
+  }
+  barr = barr.filter(x => x != 0); // ignore zeros
+  barr.reverse(); // reverse it
+  var strfn = byteArrayToString(barr); // convert to string
+  // parse hex/binary file
+  var strdata = current_project.getFile(strfn) as string;
+  if (strdata == null) throw Error("Could not $readmem '" + strfn + "'");
+  var data = strdata.split('\n').filter(s => s !== '').map(s => parseInt(s, ishex ? 16 : 2));
+  console.log('$readmem', ishex, strfn, data.length);
+  // copy into destination array
+  if (memp === null) throw Error("No destination array to $readmem " + strfn);
+  if (memp.length < data.length) throw Error("Destination array too small to $readmem " + strfn);
+  for (i=0; i<data.length; i++)
+    memp[i] = data[i];
+}
+
 // SIMULATOR BASE
 
 abstract class VerilatorBase {
@@ -218,6 +257,7 @@ var VerilogPlatform = function(mainElement, options) {
   this.__proto__ = new (BasePlatform as any)();
   
   var video, audio;
+  var poller;
   var useAudio = false;
   var videoWidth  = 292;
   var videoHeight = 256;
@@ -229,6 +269,7 @@ var VerilogPlatform = function(mainElement, options) {
 
   // control inputs
   var switches = [0,0,0];
+  var keycode = 0;
 
   // inspect feature  
   var inspect_obj, inspect_sym;
@@ -274,6 +315,8 @@ var VerilogPlatform = function(mainElement, options) {
     gen.tick2();
     if (useAudio)
       audio.feedSample(gen.spkr*(1.0/255.0), 1);
+    if (keycode && keycode >= 128 && gen.keystrobe) // keystrobe = clear hi bit of key buffer
+      keycode = gen.keycode = keycode & 0x7f;
     if (debugCond && debugCond())
       debugCond = null;
   }
@@ -295,7 +338,7 @@ var VerilogPlatform = function(mainElement, options) {
     ctx.fillText(txt, x, y);
     ctx.shadowOffsetX = 0;
   }
-
+  
   // inner Platform class
     
  class _VerilogPlatform extends BasePlatform implements WaveformProvider {
@@ -308,20 +351,27 @@ var VerilogPlatform = function(mainElement, options) {
 
   getPresets() { return VERILOG_PRESETS; }
 
+  setVideoParams(width:number, height:number, clock:number) {
+    videoWidth = width;
+    videoHeight = height;
+    cyclesPerFrame = clock;
+    maxVideoLines = height+40;
+  }
+
   start() {
     video = new RasterVideo(mainElement,videoWidth,videoHeight,{overscan:true});
     video.create();
-    var ctx = video.getContext();
-    ctx.font = "8px TinyFont";
-    ctx.fillStyle = "white";
-    ctx.textAlign = "left";
-    setKeyboardFromMap(video, switches, VERILOG_KEYCODE_MAP);
+    poller = setKeyboardFromMap(video, switches, VERILOG_KEYCODE_MAP, (o,key,code,flags) => {
+      if (flags & KeyFlags.KeyPress) {
+        keycode = code | 0x80;
+      }
+    }, true); // true = always send function
     var vcanvas = $(video.canvas);
     idata = video.getFrameData();
     timerCallback = () => {
       if (!this.isRunning())
         return;
-      gen.switches = switches[0];
+      if (gen) gen.switches = switches[0];
       this.updateFrame();
     };
     this.setFrameRate(60);
@@ -345,7 +395,26 @@ var VerilogPlatform = function(mainElement, options) {
     });
     // setup mouse events
     video.setupMouseEvents();
+    // setup mouse click
+    video.vcanvas.click( (e) => {
+      if (!gen) return; // must have created emulator
+      if (!e.ctrlKey) {
+        //setFrameRateUI(60);
+        return; // ctrl key must be down
+      }
+      setFrameRateUI(1.0/2048);
+      var pos = getMousePos(video.canvas, e);
+      var new_y = Math.floor(pos.y);
+      var clock = 0;
+      while (framey != new_y || clock++ > 200000) {
+        this.setGenInputs();
+        this.updateVideoFrameCycles(1, true, false);
+        gen.__unreset();
+      }
+    });
   }
+  
+  // TODO: pollControls() { poller.poll(); }
   
   resize() {
     if (this.waveview) this.waveview.recreate();
@@ -357,6 +426,7 @@ var VerilogPlatform = function(mainElement, options) {
     gen.switches_p1 = switches[0];
     gen.switches_p2 = switches[1];
     gen.switches_gen = switches[2];
+    gen.keycode = keycode;
   }
   
   updateVideoFrame() {
@@ -364,15 +434,18 @@ var VerilogPlatform = function(mainElement, options) {
     this.setGenInputs();
     var fps = this.getFrameRate();
     // darken the previous frame?
-    if (fps < 45) {
+    var sync = fps > 45;
+    if (!sync) {
       var mask = fps > 5 ? 0xe7ffffff : 0x7fdddddd;
       for (var i=0; i<idata.length; i++)
         idata[i] &= mask;
     }
     // paint into frame, synched with vsync if full speed
-    var sync = fps > 45;
     var trace = this.isScopeVisible();
     this.updateVideoFrameCycles(cyclesPerFrame * fps/60 + 1, sync, trace);
+    if (fps < 0.25) {
+      idata[frameidx] = -1;
+    }
     //this.restartDebugState();
     gen.__unreset();
     this.refreshVideoFrame();
@@ -387,13 +460,14 @@ var VerilogPlatform = function(mainElement, options) {
   }
 
   // TODO: merge with prev func  
-  advance(novideo : boolean) {
+  advance(novideo : boolean) : number {
     this.setGenInputs();
     this.updateVideoFrameCycles(cyclesPerFrame, true, false);
     gen.__unreset();
     if (!novideo) {
       this.refreshVideoFrame();
     }
+    return cyclesPerFrame; //TODO?
   }
   
   refreshVideoFrame() {
@@ -618,10 +692,8 @@ var VerilogPlatform = function(mainElement, options) {
     }
     // restart audio
     this.restartAudio();
-    // destroy scope
     if (this.waveview) {
-      this.waveview.destroy();
-      this.waveview = null;
+      this.waveview.recreate();
     }
   }
   
@@ -691,7 +763,7 @@ var VerilogPlatform = function(mainElement, options) {
   }
   getDefaultExtension() { return ".v"; };
 
-  inspect(name) {
+  inspect(name:string) : string {
     if (!gen) return;
     if (name && !name.match(/^\w+$/)) return;
     var val = gen[name];
@@ -712,6 +784,10 @@ var VerilogPlatform = function(mainElement, options) {
   }
 
   // DEBUGGING
+
+  getDebugTree() {
+    return this.saveState().o;
+  }
 
   // TODO: bind() a function to avoid depot?
   saveState() {
@@ -735,6 +811,7 @@ var VerilogPlatform = function(mainElement, options) {
       sw0: switches[0],
       sw1: switches[1],
       sw2: switches[2],
+      keycode: keycode
     };
   }
   loadControlsState(state) {
@@ -743,6 +820,7 @@ var VerilogPlatform = function(mainElement, options) {
     switches[0] = state.sw0;
     switches[1] = state.sw1;
     switches[2] = state.sw2;
+    keycode = state.keycode;
   }
 
  } // end of inner class
@@ -751,24 +829,24 @@ var VerilogPlatform = function(mainElement, options) {
 
 ////////////////
 
-var VERILOG_SIM_PRESETS = [
-  {id:'clock_divider.v', name:'Clock Divider'},
-  {id:'lfsr.v', name:'Linear Feedback Shift Register'},
+var VERILOG_VGA_PRESETS = [
   {id:'hvsync_generator.v', name:'Video Sync Generator'},
   {id:'test_hvsync.v', name:'Test Pattern'},
-  {id:'starfield.v', name:'Scrolling Starfield'},
   {id:'chardisplay.v', name:'RAM Text Display'},
-  {id:'sound_generator.v', name:'Sound Generator'},
+  {id:'starfield.v', name:'Scrolling Starfield'},
+  {id:'ball_paddle.v', name:'Brick Smash Game'},
 ];
 
 
-var VerilogSimulatorPlatform = function(mainElement, options) {
+var VerilogVGAPlatform = function(mainElement, options) {
   this.__proto__ = new (VerilogPlatform as any)(mainElement, options);
 
-  this.getPresets = function() { return VERILOG_SIM_PRESETS; }
+  this.getPresets = function() { return VERILOG_VGA_PRESETS; }
+
+  this.setVideoParams(800-64, 520, 25000000);
 }
 
 ////////////////
 
 PLATFORMS['verilog'] = VerilogPlatform;
-PLATFORMS['verilog.sim'] = VerilogSimulatorPlatform;
+PLATFORMS['verilog-vga'] = VerilogVGAPlatform;

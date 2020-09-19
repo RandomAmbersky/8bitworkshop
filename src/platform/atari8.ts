@@ -1,30 +1,40 @@
 "use strict";
 
-import { Platform, Base6502Platform, BaseMAMEPlatform, getOpcodeMetadata_6502, getToolForFilename_6502 } from "../baseplatform";
-import { PLATFORMS, RAM, newAddressDecoder, padBytes, noise, setKeyboardFromMap, AnimationTimer, RasterVideo, Keys, makeKeycodeMap, dumpRAM } from "../emu";
-import { hex, lzgmini, stringToByteArray, lpad, rpad, rgb2bgr } from "../util";
-import { MasterAudio, POKEYDeviceChannel } from "../audio";
+import { Platform, Base6502Platform, BaseMAMEPlatform, getOpcodeMetadata_6502, getToolForFilename_6502 } from "../common/baseplatform";
+import { PLATFORMS, RAM, newAddressDecoder, padBytes, noise, setKeyboardFromMap, AnimationTimer, RasterVideo, Keys, makeKeycodeMap, dumpRAM, getMousePos } from "../common/emu";
+import { hex, lzgmini, stringToByteArray, lpad, rpad, rgb2bgr } from "../common/util";
+import { MasterAudio, POKEYDeviceChannel, newPOKEYAudio } from "../common/audio";
 
 declare var jt; // for 6502
 
 var Atari8_PRESETS = [
-  {id:'hello.a', name:'Hello World (ASM)'},
-  {id:'hellopm.a', name:'Hello Sprites (ASM)'},
+  {id:'hello.dasm', name:'Hello World (ASM)'},
+  {id:'hellopm.dasm', name:'Hello Sprites (ASM)'},
+  {id:'helloconio.c', name:'Text Mode (C)'},
+  {id:'siegegame.c', name:'Siege Game (C)'},
+  {id:'hellodlist.c', name:'Display List (C)'},
 ];
 
-function newPOKEYAudio() {
-  var pokey1 = new POKEYDeviceChannel();
-  var audio = new MasterAudio();
-  audio['pokey1'] = pokey1; // TODO: cheezy
-  audio.master.addChannel(pokey1);
-  return audio;
-}
+var Atari800_PRESETS = Atari8_PRESETS.concat([
+  {id:'sieve.bas', name:'Benchmark (FastBasic)'},
+  {id:'pmtest.bas', name:'Sprites Test (FastBasic)'},
+  {id:'dli.bas', name:'DLI Test (FastBasic)'},
+  {id:'joyas.bas', name:'Match-3 Game (FastBasic)'},
+]);
+
+const ATARI8_KEYCODE_MAP = makeKeycodeMap([
+  [Keys.VK_SPACE, 0, 0],
+  [Keys.VK_ENTER, 0, 0],
+]);
 
 // ANTIC
 
 // https://www.atarimax.com/jindroush.atari.org/atanttim.html
 // http://www.virtualdub.org/blog/pivot/entry.php?id=243
 // http://www.beipmu.com/Antic_Timings.txt
+// https://user.xmission.com/~trevin/atari/antic_regs.html
+// https://user.xmission.com/~trevin/atari/antic_insns.html
+// http://www.atarimuseum.com/videogames/consoles/5200/conv_to_5200.html
 
 const PF_LEFT  = [999,64,48,32];
 const PF_RIGHT = [999,192,208,224];
@@ -135,7 +145,7 @@ class ANTIC {
         this.setLeftRight();
         break;
       case NMIRES:
-        this.regs[NMIST] = 0;
+        this.regs[NMIST] = 0x1f;
         break;
     }
   }
@@ -158,8 +168,9 @@ class ANTIC {
         this.yofs++;
     }
     if (!this.linesleft) {
-      if (this.mode & 0x80)
+      if (this.mode & 0x80) {
         this.triggerInterrupt(0x80); // Display List Interrupt (DLI)
+      }
       this.mode = this.nextInsn();
       this.setLeftRight();
       stolen++;
@@ -213,7 +224,7 @@ class ANTIC {
   triggerInterrupt(mask : number) {
     if (this.regs[NMIEN] & mask) {
       this.nmiPending = true;
-      //this.regs[NMIST] = mask | 0x1f;
+      this.regs[NMIST] |= mask;
     }
   }
   
@@ -262,13 +273,16 @@ class ANTIC {
               if (mode < 8) {	// character mode
                 let ch = this.ch = this.nextScreen();
                 let addrofs = this.yofs;
+                let chbase = this.regs[CHBASE];
                 // modes 6 & 7
                 if ((mode & 0xe) == 6) { // or 7
                   ch &= 0x3f;
+                  chbase &= 0xfe;
                 } else {
                   ch &= 0x7f;
+                  chbase &= 0xfc;
                 }
-                let addr = (ch<<3) + (this.regs[CHBASE]<<8);
+                let addr = (ch<<3) + (chbase<<8);
                 // modes 2 & 3
                 if ((mode & 0xe) == 2) { // or 3
                   let chactl = this.regs[CHACTL];
@@ -312,6 +326,8 @@ class ANTIC {
 }
 
 // GTIA
+// https://user.xmission.com/~trevin/atari/gtia_regs.html
+
 // write regs
 const HPOSP0 = 0x0;
 const HPOSM0 = 0x4;
@@ -430,7 +446,7 @@ const _Atari8Platform = function(mainElement) {
   var timer; // TODO : AnimationTimer;
   var antic : ANTIC;
   var gtia : GTIA;
-  var kbdlatch = 0;
+  var inputs = new Uint8Array(4);
   
  class Atari8Platform extends Base6502Platform implements Platform {
 
@@ -440,20 +456,15 @@ const _Atari8Platform = function(mainElement) {
   start() {
     cpu = new jt.M6502();
     ram = new RAM(0x4000); // TODO
-    var lzgrom = window['ATARI5200_LZGROM'];
-    if (lzgrom) {
-      bios = new lzgmini().decode(stringToByteArray(atob(lzgrom)));
-    } else {
-      bios = padBytes([0], 0x800); // TODO
-    }
+    bios = new lzgmini().decode(stringToByteArray(atob(ALTIRRA_SUPERKERNEL_LZG)));
     bus = {
       // TODO: https://github.com/dmlloyd/atari800/blob/master/DOC/cart.txt
       // TODO: http://atariage.com/forums/topic/169971-5200-memory-map/
       read: newAddressDecoder([
         [0x0000, 0x3fff, 0x3fff, function(a) { return ram.mem[a]; }],
         [0x4000, 0xbfff, 0xffff, function(a) { return rom ? rom[a-0x4000] : 0; }],
-        [0xf000, 0xffff,  0x7ff, function(a) { return bios[a]; }],
         [0xd400, 0xd4ff,    0xf, function(a) { return antic.readReg(a); }],
+        [0xf800, 0xffff,  0x7ff, function(a) { return bios[a]; }],
       ]),
       write: newAddressDecoder([
         [0x0000, 0x3fff, 0xffff, function(a,v) { ram.mem[a] = v; }],
@@ -468,41 +479,36 @@ const _Atari8Platform = function(mainElement) {
     gtia = new GTIA(antic);
     // create video/audio
     video = new RasterVideo(mainElement, 352, 192);
-    audio = newPOKEYAudio();
+    audio = newPOKEYAudio(1);
     video.create();
-    video.setKeyboardEvents((key,code,flags) => {
-      if (flags & 1) {
-        if (code) {
-          // convert to uppercase for Apple ][
-          if (code >= 0x61 && code <= 0x7a)
-             code -= 0x20; 
-          kbdlatch = (code | 0x80) & 0xff;
-        } else if (key) {
-          switch (key) {
-            case 16: return; // shift
-            case 17: return; // ctrl
-            case 18: return; // alt
-            case 37: key=8; break;	// left
-            case 39: key=21; break; // right
-            case 38: key=11; break; // up
-            case 40: key=10; break; // down
-          }
-          if (key >= 65 && key < 65+26) {
-            if (flags & 5) key -= 64; // ctrl
-          }
-          kbdlatch = (key | 0x80) & 0xff;
-        }
-      }
+    setKeyboardFromMap(video, inputs, ATARI8_KEYCODE_MAP, (o,key,code,flags) => {
+      // TODO
     });
     timer = new AnimationTimer(60, this.nextFrame.bind(this));
+    // setup mouse events
+    var rasterPosBreakFn = (e) => {
+      if (e.ctrlKey) {
+        var clickpos = getMousePos(e.target, e);
+        this.runEval( (c) => {
+          var pos = {x:antic.h, y:this.getRasterScanline()};
+          return (pos.x == (clickpos.x&~3)) && (pos.y == (clickpos.y|0));
+        });
+      }
+    };
+    var jacanvas = $("#emulator").find("canvas");
+    jacanvas.mousedown(rasterPosBreakFn);
   }
   
-  advance(novideo : boolean) {
+  advance(novideo : boolean) : number {
     var idata = video.getFrameData();
     var iofs = 0;
     var debugCond = this.getDebugCallback();
     var rgb;
     var freeClocks = 0;
+    var totalClocks = 0;
+    // load controls
+    // TODO
+    gtia.regs[0x10] = inputs[0] ^ 1;
     // visible lines
     for (var sl=0; sl<linesPerFrame; sl++) {
       for (var i=0; i<colorClocksPerLine; i+=4) {
@@ -523,6 +529,7 @@ const _Atari8Platform = function(mainElement) {
             break;
           }
           cpu.clockPulse();
+          totalClocks++;
         }
         // 4 ANTIC pulses = 8 pixels
         if (antic.v >= 24 && antic.h >= 44 && antic.h < 44+176) { // TODO: const
@@ -540,11 +547,16 @@ const _Atari8Platform = function(mainElement) {
       let bkcol = gtia.regs[COLBK];
       $(video.canvas).css('background-color', COLORS_WEB[bkcol]);
     }
+    return totalClocks;
   }
 
   loadROM(title, data) {
     rom = padBytes(data, romLength);
-    rom[rom.length-3] = 0xff; // TODO
+    this.reset();
+  }
+  
+  loadBIOS(title, data) {
+    bios = padBytes(data, 0x800);
     this.reset();
   }
 
@@ -573,33 +585,37 @@ const _Atari8Platform = function(mainElement) {
   }
 
   loadState(state) {
+    this.unfixPC(state.c);
     cpu.loadState(state.c);
+    this.fixPC(state.c);
     ram.mem.set(state.b);
     antic.loadState(state.antic);
     gtia.loadState(state.gtia);
-    kbdlatch = state.kbd;
+    this.loadControlsState(state);
   }
   saveState() {
     return {
-      c:cpu.saveState(),
+      c:this.getCPUState(),
       b:ram.mem.slice(0),
       antic:antic.saveState(),
       gtia:gtia.saveState(),
-      kbd:kbdlatch,
+      in:inputs.slice(0)
     };
   }
   loadControlsState(state) {
-    kbdlatch = state.kbd;
+    inputs.set(state.in);
   }
   saveControlsState() {
     return {
-      kbd:kbdlatch
+      in:inputs.slice(0)
     };
   }
   getCPUState() {
-    return cpu.saveState();
+    return this.fixPC(cpu.saveState());
   }
-
+  getRasterScanline() {
+    return antic.v;
+  }
   getDebugCategories() {
     return super.getDebugCategories().concat(['ANTIC','GTIA']);
   }
@@ -615,56 +631,14 @@ const _Atari8Platform = function(mainElement) {
   return new Atari8Platform(); // return inner class from constructor
 };
 
-// Atari 5200
-const _Atari5200Platform = function(mainElement) {
+// Atari 800
+const _Atari800Platform = function(mainElement) {
   this.__proto__ = new (_Atari8Platform as any)(mainElement);
 }
 
-
-/// MAME support
-
-abstract class Atari8MAMEPlatform extends BaseMAMEPlatform {
-  loadROM(title, data) {
-    this.loadROMFile(data);
-    this.loadRegion(":cartleft:cart:rom", data);
-  }
-  getPresets() { return Atari8_PRESETS; }
-  getToolForFilename = getToolForFilename_6502;
-  getDefaultExtension() { return ".c"; };
-}
-
-class Atari800MAMEPlatform extends Atari8MAMEPlatform implements Platform {
-  start() {
-    this.startModule(this.mainElement, {
-      jsfile:'mameatari400.js',
-      biosfile:'a400.zip', // TODO: load multiple files
-      //cfgfile:'atari5200.cfg',
-      driver:'a400',
-      width:336*2,
-      height:225*2,
-      romfn:'/emulator/cart.rom',
-      romsize:0x2000,
-      preInit:function(_self) {
-      },
-    });
-  }
-}
-
-class Atari5200MAMEPlatform extends Atari8MAMEPlatform implements Platform {
-  start() {
-    this.startModule(this.mainElement, {
-      jsfile:'mameatari400.js',
-      biosfile:'a5200/5200.rom',
-      //cfgfile:'atari5200.cfg',
-      driver:'a5200',
-      width:336*2,
-      height:225*2,
-      romfn:'/emulator/cart.rom',
-      romsize:0x2000,
-      preInit:function(_self) {
-      },
-    });
-  }
+// Atari 5200
+const _Atari5200Platform = function(mainElement) {
+  this.__proto__ = new (_Atari8Platform as any)(mainElement);
 }
 
 ///
@@ -809,6 +783,124 @@ for (var i=0; i<256; i++) {
 
 ///
 
+/// MAME support
+
+abstract class Atari8MAMEPlatform extends BaseMAMEPlatform {
+  getPresets() { return Atari8_PRESETS; }
+  getToolForFilename = function(fn:string) {
+    if (fn.endsWith(".bas") || fn.endsWith(".fb") || fn.endsWith(".fbi")) return "fastbasic";
+    else return getToolForFilename_6502(fn);
+  }
+  getOpcodeMetadata = getOpcodeMetadata_6502;
+  getDefaultExtension() { return ".asm"; };
+  showHelp(tool:string, ident:string) {
+    if (tool == 'fastbasic')
+      window.open("https://github.com/dmsc/fastbasic/blob/master/manual.md", "_help");
+    else
+      window.open("https://atariwiki.org/wiki/Wiki.jsp?page=Assembler", "_help"); // TODO
+  }
+}
+
+class Atari800MAMEPlatform extends Atari8MAMEPlatform implements Platform {
+  getPresets() { return Atari800_PRESETS; }
+  loadROM(title, data) {
+    if (!this.started) {
+      this.startModule(this.mainElement, {
+        jsfile:'mame8bitws.js',
+        biosfile:'a800xl.zip',
+        cfgfile:'a800xl.cfg',
+        driver:'a800xl',
+        width:336*2,
+        height:225*2,
+        romfn:'/emulator/cart.rom',
+        romdata:new Uint8Array(data),
+        romsize:0x2000,
+        preInit:function(_self) {
+        },
+      });
+    } else {
+      this.loadROMFile(data);
+      this.loadRegion(":cartleft:cart:rom", data);
+    }
+  }
+  start() {
+  }
+  getMemoryMap = function() { return { main:[
+    {name:'RAM',start:0x0,size:0x10000,type:'ram'},
+    {name:'Left Cartridge ROM',start:0xa000,size:0x2000,type:'rom'},
+    {name:'GTIA',start:0xd000,size:0x20,type:'io'},
+    {name:'POKEY',start:0xd200,size:0x10,type:'io'},
+    {name:'PIA',start:0xd300,size:0x04,type:'io'},
+    {name:'ANTIC',start:0xd400,size:0x10,type:'io'},
+    {name:'Cartridge Control Line',start:0xd600,size:0x100,type:'io'},
+    {name:'ROM',start:0xd800,size:0x800,type:'rom'},
+    {name:'ATARI Character Set',start:0xe000,size:0x400,type:'rom'},
+    {name:'ROM',start:0xe400,size:0x1c00,type:'rom'},
+  ] } };
+}
+
+class Atari5200MAMEPlatform extends Atari8MAMEPlatform implements Platform {
+  loadROM(title, data) {
+    if (!this.started) {
+      this.startModule(this.mainElement, {
+        jsfile:'mame8bitws.js',
+        biosfile:'a5200/5200.rom',
+        cfgfile:'a5200.cfg',
+        driver:'a5200',
+        width:336*2,
+        height:225*2,
+        romfn:'/emulator/cart.rom',
+        romdata:new Uint8Array(data),
+        romsize:0x8000,
+        preInit:function(_self) {
+        },
+      });
+    } else {
+      this.loadROMFile(data);
+      this.loadRegion(":cartleft:cart:rom", data);
+    }
+  }
+  start() {
+  }
+  getMemoryMap = function() { return { main:[
+    {name:'RAM',start:0x0,size:0x4000,type:'ram'},
+    {name:'Cartridge ROM',start:0x4000,size:0x8000,type:'rom'},
+    {name:'GTIA',start:0xc000,size:0x20,type:'io'},
+    {name:'ANTIC',start:0xd400,size:0x10,type:'io'},
+    {name:'POKEY',start:0xe800,size:0x10,type:'io'},
+    {name:'ATARI Character Set',start:0xf800,size:0x400,type:'rom'},
+    {name:'ROM',start:0xfc00,size:0x400,type:'rom'},
+  ] } };
+}
+
+///
+
+// Altirra Superkernel ROM (http://www.virtualdub.org/altirra.html) compiled with MADS
+const ALTIRRA_SUPERKERNEL_LZG = `
+TFpHAAAIAAAABJGU01hQARcZHSUAACUFGCUBABgAAGZmZh2IZv9mJUEAGD5gPAZ8HVBsGDBmRgAcNhw4
+b2Y7HagdoA4cGBgcDgAAcDgYGDhwHSA8/zwdehgYfhkFGh1EMCWhfhkGYx0IAAAGDBgwYEAAADxmbnZm
+PB0MHTgYHRs8Zh0RJeF+DBgMHVAMHDxsfgwdCGB8Bh1IPGB8ZiXifh15MB1oPB2IPGY+Bgw4GQRVGQNx
+JeMwHV4YDAYZBHclQWAdBhgwYBkEYBkC6Dxmbm5gPh0nHT9+ZgAAfGZ8ZmZ8HVBgYBkCUHhsZmZseBkD
+eGBgHXwl4h04PmBgbmYdMB1uGSIrfhkiOR0YBiUBHXAdLR0zAAAdJR2wY3d/a2NjHRB2fn5uHRA8HS4d
+YBkCZhkCSB1IbDYdyB1wPGA8BgYdGBkDUBkkkGZmfiXkPB0IY2Nrf3cZAkhmPB0zJeMdoH4ZAtcdIB4d
+bx4AAEAZAuoGAAB4HUh4AAAIHDYdLiUF/wAANn9/PhwIGSLHHx8lgQMlBR0D+PgZRA/4+Bkk5CXjAwcO
+HDhw4MDA4HA4HA4HAwEDBw8fP3//HRgADyUBgMDg8Pj8/v8dRB1M8CUBJeL/HZolBh3GHZQcHHd3CBwd
+RxkDeBkGFR0D//8diDx+fn48GQUu///AJQUdhxkjEx0gGQVEJQIZA8AdCHhgeGB+GQL4GDwZIjoZA0l+
+GSIwGDB+MBlDFwx+DCXjPH4dkAA8Bj4ZIshgGUJYfB1IYGBgPBkiyD5mHVAAPGZ+HUgOGD4ZBJ8dTwZ8
+HehmAAAYADgYGB1oGSP6PB0QbBkj+B0OHZAAZn9/axkich1nHRAZI+kdUBkm+RkDSAYdSBlDWAAZY3EA
+ABliPxgOHXglARkCgBkl+ABja38+Nh1IPBgZY2kdVwwZQqEZZDgZAtAYPBljzyUCAH54fG5mBgAIGDh4
+OBgIABAYHB4cGBAAbAACSKkgLA7o0A1FAI0O6KUlgmwQAjAPqYAZCQkMAnAPqUAZCQkIAmodLfAZCi0S
+AmokAPASGQ5EFAKpARkODBYCKhkOCxgZEAsaAopIur0BASkQ0ANsDgJoqmhA////aKgdQUiKSJhI5gLQ
+COYBpQQwAuYEpQPQ5aUFjQLUpQaNA9SlB40A1KAAJAQQAqQBogiYVQidEsDKEPeiB70A6JURyhD4jQvo
+bAQC////GQJBrQnoSikPqr0T/WwKAv8LAAoOCQgHDQYFBAwDAgEsD9SND9QQA2wGAmwCAnjYov+arf2/
+yf/QA2z+v6IAqQCVAJ0AwJ0A1J0A6OjQ8qn4jQnUogu9lf6dAAIZAmtPvc39nQAQHUMTvei/nVAdQ6kQ
+hQypD4UNqQCFDiVhDyVhEKkEjRvAogq9wh0nIB1cIoUHqcCNDtQdFQWpIIUGqQKND+ipwIUZIhapeMUC
+0Pxs/r9wcHBCABCCB0HC/SFsdGlycmEAFRIQEAAyLy0AK2VybmVsGWpyJQMub3cAcGxheWluZxoZDxUZ
+a58lHiUcJQkD/Lj8svyh/gL9svxI5gzQBBkiJhkj9SUfJR8lHiUBI/0x/QD8`;
+
+///
+
+PLATFORMS['atari8-800'] = _Atari800Platform;
 PLATFORMS['atari8-5200'] = _Atari5200Platform;
-PLATFORMS['atari8-800.mame'] = Atari800MAMEPlatform;
+PLATFORMS['atari8-800xl.mame'] = Atari800MAMEPlatform;
 PLATFORMS['atari8-5200.mame'] = Atari5200MAMEPlatform;

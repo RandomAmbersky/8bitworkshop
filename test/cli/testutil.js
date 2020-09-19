@@ -3,8 +3,8 @@ var vm = require('vm');
 var fs = require('fs');
 var assert = require('assert');
 
-var emu = require("gen/emu.js");
-var util = require("gen/util.js");
+var emu = require("gen/common/emu.js");
+var util = require("gen/common/util.js");
 var nes = require("gen/platform/nes.js");
 
 var NES_CONIO_ROM_LZG = [
@@ -113,9 +113,18 @@ describe('LZG', function() {
 
 describe('string functions', function() {
   it('Should detect binary', function() {
-    assert.ok(!util.isProbablyBinary([32,32,10,13,9,32,32,10,13]));
-    assert.ok(util.isProbablyBinary([32,32,0x80]));
-    assert.ok(!util.isProbablyBinary([32,32,0xc1,0x81,32,32,10,13]));
-    assert.ok(util.isProbablyBinary(NES_CONIO_ROM_LZG));
+    assert.ok(!util.isProbablyBinary(null, [32,32,10,13,9,32,32,10,13]));
+    assert.ok(util.isProbablyBinary(null, [32,32,0x80]));
+    assert.ok(!util.isProbablyBinary(null, [32,32,0xc1,0x81,32,32,10,13]));
+    assert.ok(util.isProbablyBinary(null, NES_CONIO_ROM_LZG));
+    assert.ok(util.isProbablyBinary('test.bin'));
+    assert.ok(util.isProbablyBinary('test.chr'));
+    assert.ok(!util.isProbablyBinary('test.txt'));
+    assert.ok(util.isProbablyBinary('test.dat'));
+    assert.ok(!util.isProbablyBinary(null, [0x20,0xa9,0x20,0x31,0x39,0x38,0x32]));
+    assert.ok(util.isProbablyBinary(null, [0x00,0x00])); // 00 is binary
+    assert.ok(util.isProbablyBinary(null, [0x9f])); // 9f is binary
+    assert.ok(util.isProbablyBinary(null, [0xff])); // FF is binary
+    assert.ok(util.isProbablyBinary(null, [0xf0,0x12])); // ran out of data
   });
 });

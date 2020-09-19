@@ -1,14 +1,26 @@
-﻿
+
+/*
+Displays a bitmap using the TMS9928A's Mode 2.
+
+In Mode 2, the screen is horizontally divided into three
+256×64 pixel areas, each of which gets its own character
+set. By sequentially printing the characters 0 through 255
+in all three areas, the program can simulate a graphics mode
+where each pixel can be set individually.
+
+The limitation is that every horizontal run of 8 pixels
+can only have two colors (a foreground and background color.)
+
+The included Mode 2 bitmap was converted with a web utility:
+http://msx.jannone.org/conv/
+*/
 
 #include <stdlib.h>
 
 #include <cv.h>
 #include <cvu.h>
 
-#define PATTERN	0x0000	// $0000 - $17ff
-#define IMAGE	0x1800	// $1800 - $1aff
-#define SPRITES	0x1b00	// not used
-#define COLOR	0x2000	// $2000 - $37ff
+#include "common.h"
 
 /* link in MODE 2 bitmap data */
 

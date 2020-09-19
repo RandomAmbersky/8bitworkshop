@@ -4,14 +4,14 @@ var fs = require('fs');
 var wtu = require('./workertestutils.js');
 //var heapdump = require('heapdump');
 
-// TODO: why memory leak?
-CACHE_WASM_MODULES = false;
-
 global.onmessage({data:{preload:'cc65', platform:'nes'}});
 global.onmessage({data:{preload:'ca65', platform:'nes'}});
 global.onmessage({data:{preload:'cc65', platform:'apple2'}});
 global.onmessage({data:{preload:'ca65', platform:'apple2'}});
+global.onmessage({data:{preload:'cc65', platform:'c64'}});
+global.onmessage({data:{preload:'ca65', platform:'c64'}});
 global.onmessage({data:{preload:'sdcc'}});
+global.onmessage({data:{preload:'inform6'}});
 
 // TODO: check msg against spec
 
@@ -45,11 +45,15 @@ function doBuild(msgs, callback, outlen, nlines, nerrors, options) {
             }
             assert.ok(err.msg);
           }
-          assert.equal(nerrors, msg.errors.length, "errors");
+          assert.equal(nerrors, msg.errors.length);
         } else {
-          assert.equal(nerrors||0, 0, "errors");
-          assert.equal(msg.output.code?msg.output.code.length:msg.output.length, outlen, "output binary");
-          assert.ok(msg.output.code || msg.output instanceof Uint8Array);
+          assert.equal(nerrors||0, 0);
+          if (msg.output.stmts) { // AST for BASIC
+            assert.equal(msg.output.stmts.length, outlen);
+          } else {
+            assert.equal(msg.output.code?msg.output.code.length:msg.output.length, outlen);
+            assert.ok(msg.output.code || msg.output instanceof Uint8Array);
+          }
           if (nlines) {
             if (typeof nlines === 'number')
               nlines = [nlines];
@@ -59,7 +63,7 @@ function doBuild(msgs, callback, outlen, nlines, nerrors, options) {
             lstkeys.sort();
             for (var key of lstkeys) {
               var listing = msg.listings[key];
-              assert.equal(listing.lines.length, nlines[i++], "listing lines");
+              assert.equal(listing.lines.length, nlines[i++]);
             }
           }
         }
@@ -78,10 +82,10 @@ function doBuild(msgs, callback, outlen, nlines, nerrors, options) {
 
 describe('Worker', function() {
   it('should assemble DASM', function(done) {
-    compile('dasm', '\tprocessor 6502\n\torg $f000\nfoo lda #0\n', 'vcs', done, 2, 1);
+    compile('dasm', '\tprocessor 6502\n\torg $f000\nfoo lda #0\n', 'vcs.mame', done, 2, 1);
   });
   it('should NOT assemble DASM', function(done) {
-    compile('dasm', '\tprocessor 6502\n\torg $f000\nfoo xxx #0\n', 'vcs', done, 0, 0, 1);
+    compile('dasm', '\tprocessor 6502\n\torg $f000 ; this is a comment\nfoo asl a\n', 'vcs', done, 0, 0, 1);
   });
   /*
   it('should assemble ACME', function(done) {
@@ -98,19 +102,16 @@ describe('Worker', function() {
   });
   */
   it('should compile CC65', function(done) {
-    compile('cc65', 'int main() {\nint x=1;\nreturn x+2;\n}', 'nes-conio', done, 40976, 3);
+    compile('cc65', 'int main() {\nint x=1;\nreturn x+2;\n}', 'nes.mame', done, 40976, 3);
   });
   it('should NOT compile CC65 (compile error)', function(done) {
-    compile('cc65', 'int main() {\nint x=1;\nprintf("%d",x);\nreturn x+2;\n}', 'nes-conio', done, 0, 0, 1);
+    compile('cc65', 'int main() {\nint x=1;\nprintf("%d",x);\nreturn x+2;\n}', 'nes', done, 0, 0, 1);
   });
   it('should NOT compile CC65 (link error)', function(done) {
-    compile('cc65', 'extern void bad();\nint main() {\nbad();\nreturn 0;\n}', 'nes-conio', done, 0, 0, 1, {ignoreErrorPath:true});
+    compile('cc65', 'extern void bad();\nint main() {\nbad();\nreturn 0;\n}', 'nes', done, 0, 0, 3, {ignoreErrorPath:true});
   });
   it('should NOT compile CC65 (preproc error)', function(done) {
-    compile('cc65', '#include "NOSUCH.file"\n', 'nes-conio', done, 0, 0, 1, {ignoreErrorPath:true});
-  });
-  it('should assemble CA65', function(done) {
-    compile('ca65', '\t.segment "HEADER"\n\t.segment "STARTUP"\n\t.segment "CHARS"\n\t.segment "VECTORS"\n\tlda #0\n\tsta $1\n', 'nes-conio', done, 40976, 2);
+    compile('cc65', '#include "NOSUCH.file"\n', 'nes', done, 0, 0, 1, {ignoreErrorPath:true});
   });
   /*
   it('should assemble Z80ASM', function(done) {
@@ -135,12 +136,6 @@ describe('Worker', function() {
   it('should compile SDCC w/ include', function(done) {
     compile('sdcc', '#include <string.h>\nvoid main() {\nstrlen(0);\n}\n', 'mw8080bw', done, 8192, 2, 0);
   });
-  /*
-  it('should compile vicdual skeleton', function(done) {
-    var csource = ab2str(fs.readFileSync('presets/vicdual/skeleton.sdcc'));
-    compile('sdcc', csource, 'vicdual', done, 16416, 45, 0);
-  });
-  */
   it('should compile mw8080 skeleton', function(done) {
     var csource = ab2str(fs.readFileSync('presets/mw8080bw/skeleton.sdcc'));
     compile('sdcc', csource, 'mw8080bw', done, 8192, 84, 0);
@@ -162,15 +157,13 @@ describe('Worker', function() {
     compile('sdcc', csource, 'sound_williams-z80', done, 16384, 6, 0);
   });
   it('should compile coleco skeleton', function(done) {
-    var csource = ab2str(fs.readFileSync('presets/coleco/text.c'));
-    compile('sdcc', csource, 'coleco', done, 32768, 15, 0);
+    var csource = ab2str(fs.readFileSync('presets/coleco/cursorsmooth.c'));
+    compile('sdcc', csource, 'coleco', done, 32768, 59, 0);
   });
-  /* TODO: load extra files
   it('should compile sg1000 skeleton', function(done) {
-    var csource = ab2str(fs.readFileSync('presets/sg1000/text.c'));
-    compile('sdcc', csource, 'sg1000', done, 32768, 15, 0);
+    var csource = ab2str(fs.readFileSync('presets/sms-sg1000-libcv/cursorsmooth.c'));
+    compile('sdcc', csource, 'sms-sg1000-libcv', done, 49152, 80, 0);
   });
-  */
   it('should compile verilog example', function(done) {
     var csource = ab2str(fs.readFileSync('presets/verilog/lfsr.v'));
     var msgs = [{code:csource, platform:"verilog", tool:"verilator", path:'main.v'}];
@@ -228,11 +221,9 @@ describe('Worker', function() {
   it('should NOT preprocess SDCC', function(done) {
     compile('sdcc', 'int x=0\n#bah\n', 'mw8080bw', done, 0, 0, 1);
   });
-  /*
   it('should compile XASM6809', function(done) {
-    compile('xasm6809', '\tasld\n\tasld\n', 'mw8080bw', done, 4, 2, 0);
+    compile('xasm6809', '\tasld\n\tasld\n', 'williams', done, 4, 2, 0);
   });
-  */
   it('should link two files with SDCC', function(done) {
     var msgs = [
     {
@@ -256,8 +247,8 @@ describe('Worker', function() {
             {"path":"fn.c", "data":"int mul2(int x) { return x*x; }\n"}
         ],
         "buildsteps":[
-            {"path":"main.c", "platform":"nes-conio", "tool":"cc65"},
-            {"path":"fn.c", "platform":"nes-conio", "tool":"cc65"}
+            {"path":"main.c", "platform":"nes", "tool":"cc65"},
+            {"path":"fn.c", "platform":"nes", "tool":"cc65"}
         ]
     };
     var m2 = {
@@ -265,8 +256,8 @@ describe('Worker', function() {
             {"path":"main.c", "data":"extern int mul2(int x); \nint main() { return mul2(2); }\n"}
         ],
         "buildsteps":[
-            {"path":"main.c", "platform":"nes-conio", "tool":"cc65"},
-            {"path":"fn.c", "platform":"nes-conio", "tool":"cc65"}
+            {"path":"main.c", "platform":"nes", "tool":"cc65"},
+            {"path":"fn.c", "platform":"nes", "tool":"cc65"}
         ]
     };
     var msgs = [m, m, m2];
@@ -319,5 +310,33 @@ describe('Worker', function() {
     compile('cc65', csource, 'apple2', done, 17349, 4, 0);
   });
   // TODO: test if compile, errors, then compile same file
+  // TODO: params persist because of fixParamsWithDefines()
+  it('should compile CC65 banked', function(done) {
+    compile('cc65', '#define NES_MAPPER 4\nint main() {\nint x=1;\nreturn x+2;\n}', 'nes', done, 131088, 3);
+  });
+  it('should assemble CA65', function(done) {
+    compile('ca65', ';#define LIBARGS ,\n\t.segment "HEADER"\n\t.segment "STARTUP"\n\t.segment "CHARS"\n\t.segment "VECTORS"\n\t.segment "SAMPLES"\n\t.segment "CODE"\n\tlda #0\n\tsta $1\n', 'nes', done, 131088, 2);
+  });
+  it('should compile C64 cc65 skeleton', function(done) {
+    var csource = ab2str(fs.readFileSync('presets/c64/skeleton.cc65'));
+    compile('cc65', csource, 'c64.wasm', done, 2753, 2, 0);
+  });
+  /*
+  it('should compile zmachine inform6 skeleton', function(done) {
+    var csource = ab2str(fs.readFileSync('presets/zmachine/skeleton.inform6'));
+    compile('inform6', csource, 'hello.z5', done, 2753, 2, 0);
+  });
+  */
+  // TODO: vectrex, x86
+  it('should compile basic example', function(done) {
+    var csource = ab2str(fs.readFileSync('presets/basic/wumpus.bas'));
+    var msgs = [{code:csource, platform:"basic", tool:"basic", path:'wumpus.bas'}];
+    var done2 = function(err, msg) {
+      var ast = msg.output;
+      assert.ok(ast);
+      done(err, msg);
+    };
+    doBuild(msgs, done2, 205, 0, 0);
+  });
 
 });

@@ -1,16 +1,18 @@
 "use strict";
 
-import { PLATFORMS } from "../emu";
-import { Platform } from "../baseplatform";
+import { PLATFORMS } from "../common/emu";
+import { Platform } from "../common/baseplatform";
 
 class MarkdownPlatform implements Platform {
-  mainElement;
-  htmlDiv;
+  mainElement : HTMLElement;
+  iframe : HTMLIFrameElement;
 
   constructor(mainElement:HTMLElement) {
     this.mainElement = mainElement;
-    this.htmlDiv = $('<div class="markdown">').appendTo(mainElement);
-    $(mainElement).css('overflowY', 'auto');
+    this.iframe = $('<iframe sandbox="allow-same-origin" width="100%" height="100%"/>').appendTo(mainElement)[0] as HTMLIFrameElement;
+    this.iframe.style.backgroundColor = 'white';
+    mainElement.classList.add("vertical-scroll"); //100% height
+    mainElement.style.overflowY = 'auto';
   }
   start() {
   }
@@ -20,8 +22,8 @@ class MarkdownPlatform implements Platform {
   }
   resume() {
   }
-  loadROM(title, data) {
-    this.htmlDiv.html(data);
+  loadROM(title, data:string) {
+    $(this.iframe).contents().find('body').html(data);
   }
   isRunning() {
     return false;

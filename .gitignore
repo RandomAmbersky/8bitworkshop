@@ -1,7 +1,10 @@
 *~
 node_modules
-blog
-local
-release
-gen
-test/output
+local/
+tests_output/
+test/output/
+.DS_Store
+tmp/
+web/
+release/
+gen/

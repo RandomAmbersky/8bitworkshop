@@ -1,52 +1,58 @@
 "use strict";
 
-import { Platform, BasePlatform, cpuStateToLongString_6502, BaseMAMEPlatform, EmuRecorder, dumpStackToString, DisasmLine } from "../baseplatform";
-import { PLATFORMS, RAM, newAddressDecoder, dumpRAM } from "../emu";
-import { hex, lpad, tobin, byte2signed } from "../util";
-import { CodeAnalyzer_vcs } from "../analysis";
-import { disassemble6502 } from "../cpu/disasm6502";
+import { Platform, BasePlatform, cpuStateToLongString_6502, BaseMAMEPlatform, EmuRecorder, dumpStackToString, DisasmLine, CpuState } from "../common/baseplatform";
+import { PLATFORMS, RAM, newAddressDecoder, dumpRAM } from "../common/emu";
+import { hex, lpad, tobin, byte2signed } from "../common/util";
+import { CodeAnalyzer_vcs } from "../common/analysis";
+import { disassemble6502 } from "../common/cpu/disasm6502";
+import { ProbeRecorder } from "../common/recorder";
+import { NullProbe, Probeable, ProbeAll } from "../common/devices";
 
 declare var Javatari : any;
 declare var jt : any; // 6502
 
 const VCS_PRESETS = [
-  {id:'examples/hello', chapter:4, name:'Hello 6502 and TIA'},
-  {id:'examples/vsync', chapter:5, name:'Painting on the CRT', title:'Color Bars'},
-  {id:'examples/playfield', chapter:6, name:'Playfield Graphics'},
-  {id:'examples/sprite', chapter:7, name:'Players and Sprites'},
-  {id:'examples/timing2', chapter:9, name:'Fine Positioning', title:'Fine Position'},
-  {id:'examples/missiles', chapter:10, name:'Player/Missile Graphics', title:'Player/Missile'},
-  {id:'examples/complexscene', chapter:15, name:'Complex Scene I'},
-  {id:'examples/complexscene2', chapter:16, name:'Complex Scene II'},
-  {id:'examples/scoreboard', chapter:18, name:'Scoreboard'},
-  {id:'examples/collisions', chapter:19, name:'Collisions'},
-  {id:'examples/bitmap', chapter:20, name:'Async Playfield: Bitmap', title:'Async PF Bitmap'},
-  {id:'examples/brickgame', chapter:21, name:'Async Playfield: Bricks', title:'Async PF Bricks'},
-//  {id:'examples/multisprite1', chapter:8, name:'Sprite Kernel'},
-  {id:'examples/bigsprite', chapter:22, name:'A Big 48-Pixel Sprite', title:'48-Pixel Sprite'},
-  {id:'examples/tinyfonts2', chapter:23, name:'Tiny Text'},
-  {id:'examples/score6', chapter:24, name:'6-Digit Score'},
-  {id:'examples/retrigger', chapter:26, name:'Sprite Formations'},
-//  {id:'examples/tinyfonts', chapter:23, name:'Tiny Fonts, Slow'},
-  {id:'examples/multisprite3', chapter:28, name:'Multisprites'},
-  {id:'examples/procgen1', chapter:30, name:'Procedural Generation'},
-  {id:'examples/lines', chapter:31, name:'Drawing Lines'},
-//  {id:'examples/piatable', name:'Timer Table'},
-  {id:'examples/musicplayer', chapter:32, name:'Music Player'},
-  {id:'examples/road', chapter:33, name:'Pseudo 3D Road'},
-  {id:'examples/bankswitching', chapter:35, name:'Bankswitching'},
-  {id:'examples/wavetable', chapter:36, name:'Wavetable Sound'},
-  {id:'examples/fracpitch', name:'Fractional Pitch'},
-  {id:'examples/pal', name:'PAL Video Output'},
-//  {id:'examples/testlibrary', name:'VCS Library Demo'},
-//  {id:'examples/music2', name:'Pitch-Accurate Music'},
-//  {id:'examples/fullgame', name:'Thru Hike: The Game', title:'Thru Hike'},
+  {id:'examples/hello.a', chapter:4, name:'Hello 6502 and TIA'},
+  {id:'examples/vsync.a', chapter:5, name:'Painting on the CRT', title:'Color Bars'},
+  {id:'examples/playfield.a', chapter:6, name:'Playfield Graphics'},
+  {id:'examples/sprite.a', chapter:7, name:'Players and Sprites'},
+  {id:'examples/colorsprites.a', chapter:8, name:'Color Sprites'},
+  {id:'examples/timing2.a', chapter:9, name:'Fine Positioning', title:'Fine Position'},
+  {id:'examples/missiles.a', chapter:10, name:'Player/Missile Graphics', title:'Player/Missile'},
+  {id:'examples/sethorizpos.a', chapter:11, name:'SetHorizPos Routine'},
+  {id:'examples/piatimer.a', chapter:12, name:'PIA Timer'},
+  {id:'examples/controls.a', chapter:13, name:'Joysticks'},
+  {id:'examples/complexscene.a', chapter:15, name:'Complex Scene I'},
+  {id:'examples/complexscene2.a', chapter:16, name:'Complex Scene II'},
+  {id:'examples/scoreboard.a', chapter:18, name:'Scoreboard'},
+  {id:'examples/collisions.a', chapter:19, name:'Collisions'},
+  {id:'examples/bitmap.a', chapter:20, name:'Async Playfield: Bitmap', title:'Async PF Bitmap'},
+  {id:'examples/brickgame.a', chapter:21, name:'Async Playfield: Bricks', title:'Async PF Bricks'},
+//  {id:'examples/multisprite1.a', chapter:8, name:'Sprite Kernel'},
+  {id:'examples/bigsprite.a', chapter:22, name:'A Big 48-Pixel Sprite', title:'48-Pixel Sprite'},
+  {id:'examples/tinyfonts2.a', chapter:23, name:'Tiny Text'},
+  {id:'examples/score6.a', chapter:24, name:'6-Digit Score'},
+  {id:'examples/retrigger.a', chapter:26, name:'Sprite Formations'},
+//  {id:'examples/tinyfonts.a', chapter:23, name:'Tiny Fonts, Slow'},
+  {id:'examples/multisprite3.a', chapter:28, name:'Multisprites'},
+  {id:'examples/procgen1.a', chapter:30, name:'Procedural Generation'},
+  {id:'examples/lines.a', chapter:31, name:'Drawing Lines'},
+//  {id:'examples/piatable.a', name:'Timer Table'},
+  {id:'examples/musicplayer.a', chapter:32, name:'Music Player'},
+  {id:'examples/road.a', chapter:33, name:'Pseudo 3D Road'},
+  {id:'examples/bankswitching.a', chapter:35, name:'Bankswitching'},
+  {id:'examples/wavetable.a', chapter:36, name:'Wavetable Sound'},
+  {id:'examples/fracpitch.a', name:'Fractional Pitch'},
+  {id:'examples/pal.a', name:'PAL Video Output'},
+//  {id:'examples/testlibrary.a', name:'VCS Library Demo'},
+//  {id:'examples/music2.a', name:'Pitch-Accurate Music'},
+//  {id:'examples/fullgame.a', name:'Thru Hike: The Game', title:'Thru Hike'},
   {id:'bb/helloworld.bas', name:'Hello World (batariBASIC)'},
   {id:'bb/draw.bas', name:'Playfield Draw (batariBASIC)'},
   {id:'bb/sample.bas', name:'Sprite Test (batariBASIC)'},
   {id:'bb/FIFA1977.bas', name:'2P Soccer Game (batariBASIC)'},
   {id:'bb/duck_chase.bas', name:'Duck Chase (batariBASIC)'},
-  {id:'bb/rblast106.bas', name:'Road Blasters (batariBASIC)'},
+//  {id:'bb/rblast106.bas', name:'Road Blasters (batariBASIC)'},
 ];
 
 Javatari.AUTO_START = false;
@@ -59,22 +65,36 @@ class VCSPlatform extends BasePlatform {
 
   lastBreakState; // last breakpoint state
 
+  // TODO: super hack for ProbeBitmap view
+  machine = {
+    cpuCyclesPerLine: 76 // NTSC
+  };
+
   getPresets() { return VCS_PRESETS; }
 
   start() {
-    var self = this;
+    var self : VCSPlatform = this;
     $("#javatari-div").show();
     Javatari.start();
+    var console = Javatari.room.console;
     // intercept clockPulse function
-    Javatari.room.console.oldClockPulse = Javatari.room.console.clockPulse;
-    Javatari.room.console.clockPulse = function() {
+    console.oldClockPulse = console.clockPulse;
+    console.clockPulse = function() {
       self.updateRecorder();
+      self.probe.logNewFrame();
       this.oldClockPulse();
+    }
+    // intercept TIA end of line
+    var videoSignal = console.tia.getVideoOutput();
+    videoSignal.oldNextLine = videoSignal.nextLine;
+    videoSignal.nextLine = function(pixels, vsync) {
+      self.probe.logNewScanline();
+      return this.oldNextLine(pixels, vsync);
     }
     // setup mouse events
     var rasterPosBreakFn = (e) => {
       if (e.ctrlKey) {
-        Javatari.room.console.resetDebug();
+        console.resetDebug();
         var vcanvas = $(e.target);
         var x = e.pageX - vcanvas.offset().left;
         var y = e.pageY - vcanvas.offset().top;
@@ -112,6 +132,9 @@ class VCSPlatform extends BasePlatform {
     var ypos = row-39;
     return {x:xpos, y:ypos};
   }
+  getRasterScanline() : number {
+    return this.getRasterPosition().y;
+  }
 
   // TODO: Clock changes this on event, so it may not be current
   isRunning() {
@@ -124,10 +147,13 @@ class VCSPlatform extends BasePlatform {
   }
   resume() {
     Javatari.room.console.go();
-    Javatari.room.speaker.play();
+    // for browser autostart
+    Javatari.room.speaker.powerOff();
+    Javatari.room.speaker.powerOn();
   }
-  advance() {
+  advance() : number {
     Javatari.room.console.clockPulse();
+    return 0; //TODO
   }
   // for unit test
   nextFrame() {
@@ -150,6 +176,7 @@ class VCSPlatform extends BasePlatform {
     Javatari.room.speaker.mute();
   }
   isDebugging() : boolean {
+    // TODO: always true
     return Javatari.room.console.onBreakpointHit != null;
   }
   clearDebug() {
@@ -177,8 +204,8 @@ class VCSPlatform extends BasePlatform {
     return state;
   }
   fixState(state) {
-    var ofs = state.ca.bo || 0;
-    if (state.ca.fo && (state.c.PC & 0xfff) >= 2048)
+    var ofs = (state.ca && state.ca.bo) || 0;
+    if (state.ca && state.ca.fo && (state.c.PC & 0xfff) >= 2048)
       ofs = state.ca.fo; // 3E/3F fixed-slice formats
     // TODO: for batari BASIC
     state.c.EPC = state.c.PC + ofs; // EPC = effective PC for ROM
@@ -186,7 +213,7 @@ class VCSPlatform extends BasePlatform {
   loadState(state) {
     return Javatari.room.console.loadState(state);
   }
-  getCPUState() {
+  getCPUState() : CpuState {
     return Javatari.room.console.saveState().c;
   }
   saveControlsState() {
@@ -199,6 +226,8 @@ class VCSPlatform extends BasePlatform {
     // TODO: shouldn't have to do this when debugging
     if (this.lastBreakState && addr >= 0x80 && addr < 0x100)
       return this.getRAMForState(this.lastBreakState)[addr & 0x7f];
+    else if ((addr & 0x1280) === 0x280)
+      return 0; // don't read PIA
     else
       return Javatari.room.console.readAddress(addr);
   }
@@ -235,7 +264,9 @@ class VCSPlatform extends BasePlatform {
     if (fn.endsWith(".bb") || fn.endsWith(".bas")) return "bataribasic";
     return "dasm";
   }
-  getDefaultExtension() { return ".a"; };
+  getDefaultExtension() { return ".a"; }
+
+  getROMExtension() { return ".a26"; }
 
   getDebugCategories() {
     return ['CPU','Stack','PIA','TIA'];
@@ -286,14 +317,78 @@ class VCSPlatform extends BasePlatform {
   disassemble(pc:number, read:(addr:number)=>number) : DisasmLine {
     return disassemble6502(pc, read(pc), read(pc+1), read(pc+2));
   }
-  
+
   showHelp(tool:string, ident:string) {
     if (tool == 'bataribasic')
       window.open("help/bataribasic/manual.html", "_help");
     else
-      window.open("https://alienbill.com/2600/101/docs/stella.html", "_help"); // TODO
+      window.open("https://8bitworkshop.com/blog/platforms/vcs/", "_help"); // TODO
   }
-  
+
+  getMemoryMap = function() { return {main:[
+      {name:'TIA Registers',start:0x00,size:0x80,type:'io'},
+      {name:'PIA RAM',start:0x80,size:0x80,type:'ram'},
+      {name:'PIA Ports and Timer',start:0x280,size:0x18,type:'io'},
+      {name:'Cartridge ROM',start:0xf000,size:0x1000,type:'rom'},
+  ]}};
+
+  // probing
+  nullProbe = new NullProbe();
+  probe : ProbeAll = this.nullProbe;
+
+  startProbing?() : ProbeRecorder {
+    var self : VCSPlatform = this;
+    var rec = new ProbeRecorder(this);
+    this.connectProbe(rec);
+    var probe = this.probe;
+    // intercept CPU clock pulse
+    var cpu = Javatari.room.console.cpu;
+    if (cpu.oldCPUClockPulse == null) {
+      cpu.oldCPUClockPulse = cpu.clockPulse;
+      cpu.clockPulse = function() {
+        if (cpu.isPCStable())
+          probe.logExecute(cpu.getPC(), cpu.getSP());
+        this.oldCPUClockPulse();
+        probe.logClocks(1);
+      }
+    }
+    // intercept bus read/write
+    var bus = Javatari.room.console.bus;
+    if (bus.oldRead == null) {
+      bus.oldRead = bus.read;
+      bus.read = function(a) {
+        var v = this.oldRead(a);
+        probe.logRead(a,v);
+        return v;
+      }
+      bus.oldWrite = bus.write;
+      bus.write = function(a,v) {
+        this.oldWrite(a,v);
+        probe.logWrite(a,v);
+      }
+    }
+    return rec;
+  }
+  stopProbing?() : void {
+    this.connectProbe(null);
+    var cpu = Javatari.room.console.cpu;
+    if (cpu.oldCPUClockPulse != null) {
+      cpu.clockPulse = cpu.oldCPUClockPulse;
+      cpu.oldCPUClockPulse = null;
+    }
+    var bus = Javatari.room.console.bus;
+    if (bus.oldRead) {
+      bus.read = bus.oldRead;
+      bus.oldRead = null;
+    }
+    if (bus.oldWrite) {
+      bus.write = bus.oldWrite;
+      bus.oldWrite = null;
+    }
+  }
+  connectProbe(probe:ProbeAll) {
+    this.probe = probe || this.nullProbe;
+  }
 };
 
 // TODO: mixin for Base6502Platform?
@@ -310,7 +405,7 @@ class VCSMAMEPlatform extends BaseMAMEPlatform implements Platform {
 
   start = function() {
     this.startModule(this.mainElement, {
-      jsfile:'mamea2600.js',
+      jsfile:'mame8bitws.js',
       driver:'a2600',
       width:176*2,
       height:223,
@@ -334,6 +429,7 @@ class VCSMAMEPlatform extends BaseMAMEPlatform implements Platform {
   getOriginPC = function() {
     return (this.readAddress(0xfffc) | (this.readAddress(0xfffd) << 8)) & 0xffff;
   }
+  
 }
 
 ////////////////

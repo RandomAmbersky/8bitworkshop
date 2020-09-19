@@ -1,3 +1,9 @@
+/*
+A character-based surround-the-opponent game.
+Reads from nametable RAM to determine collisions, and also
+to help the AI avoid walls.
+For more information, see "Making Arcade Games in C".
+*/
 
 #include <stdlib.h>
 #include <string.h>
@@ -6,22 +12,15 @@
 
 #include "neslib.h"
 
-#pragma data-name (push,"CHARS")
-#pragma data-name(pop)
+// VRAM buffer module
+#include "vrambuf.h"
+//#link "vrambuf.c"
 
-//#link "tileset1.c"
-
-extern unsigned char palSprites[16];
-extern unsigned char TILESET[8*256];
+// link the pattern table into CHR ROM
+//#link "chr_generic.s"
 
 #define COLS 32
-#define ROWS 28
-
-#define NTADR(x,y) ((0x2000|((y)<<5)|(x)))
-
-typedef unsigned char byte;
-typedef signed char sbyte;
-typedef unsigned short word;
+#define ROWS 27
 
 // read a character from VRAM.
 // this is tricky because we have to wait
@@ -30,63 +29,30 @@ typedef unsigned short word;
 // back to the start of the frame.
 byte getchar(byte x, byte y) {
   // compute VRAM read address
-  word addr = NTADR(x,y);
+  word addr = NTADR_A(x,y);
+  // result goes into rd
   byte rd;
   // wait for VBLANK to start
-  waitvsync();
+  ppu_wait_nmi();
+  // set vram address and read byte into rd
   vram_adr(addr);
   vram_read(&rd, 1);
+  // scroll registers are corrupt
+  // fix by setting vram address
   vram_adr(0x0);
-  return rd + 0x20;
-}
-
-// VRAM UPDATE BUFFER
-
-byte updbuf[64];
-byte updptr = 0;
-
-void cendbuf() {
-  updbuf[updptr] = NT_UPD_EOF;
-}
-
-void cflushnow() {
-  cendbuf();
-  waitvsync();
-  flush_vram_update(updbuf);
-  updptr = 0;
-  cendbuf();
-  vram_adr(0x0);
-}
-
-void vdelay(byte count) {
-  while (count--) cflushnow();
+  return rd;
 }
 
 void cputcxy(byte x, byte y, char ch) {
-  word addr = NTADR(x,y);
-  if (updptr >= 60) cflushnow();
-  updbuf[updptr++] = addr >> 8;
-  updbuf[updptr++] = addr & 0xff;
-  updbuf[updptr++] = ch - 0x20;
-  cendbuf();
+  vrambuf_put(NTADR_A(x,y), &ch, 1);
 }
 
-void cputsxy(byte x, byte y, char* str) {
-  word addr = NTADR(x,y);
-  byte len = strlen(str);
-  if (updptr >= 60 - len) cflushnow();
-  updbuf[updptr++] = (addr >> 8) | NT_UPD_HORZ;
-  updbuf[updptr++] = addr & 0xff;
-  updbuf[updptr++] = len;
-  while (len--) {
-    	updbuf[updptr++] = *str++ - 0x20;
-  }
-  cendbuf();
+void cputsxy(byte x, byte y, const char* str) {
+  vrambuf_put(NTADR_A(x,y), str, strlen(str));
 }
 
 void clrscr() {
-  updptr = 0;
-  cendbuf();
+  vrambuf_clear();
   ppu_off();
   vram_adr(0x2000);
   vram_fill(0, 32*28);
@@ -142,7 +108,7 @@ void draw_playfield() {
   cputcxy(9,1,players[0].score+'0');
   cputcxy(28,1,players[1].score+'0');
   if (attract) {
-    cputsxy(5,ROWS-1,"ATTRACT MODE - PRESS 1");
+    cputsxy(3,ROWS-1,"ATTRACT MODE - PRESS ENTER");
   } else {
     cputsxy(1,1,"PLYR1:");
     cputsxy(20,1,"PLYR2:");
@@ -157,8 +123,8 @@ void init_game() {
   memset(players, 0, sizeof(players));
   players[0].head_attr = '1';
   players[1].head_attr = '2';
-  players[0].tail_attr = '#';
-  players[1].tail_attr = '*';
+  players[0].tail_attr = 0x06;
+  players[1].tail_attr = 0x07;
   frames_per_move = START_SPEED;
 }
 
@@ -179,7 +145,7 @@ void move_player(Player* p) {
   cputcxy(p->x, p->y, p->tail_attr);
   p->x += DIR_X[p->dir];
   p->y += DIR_Y[p->dir];
-  if (getchar(p->x, p->y) != ' ')
+  if (getchar(p->x, p->y) != 0)
     p->collided = 1;
   draw_player(p);
 }
@@ -208,7 +174,7 @@ byte ai_try_dir(Player* p, dir_t dir, byte shift) {
   dir &= 3;
   x = p->x + (DIR_X[dir] << shift);
   y = p->y + (DIR_Y[dir] << shift);
-  if (x < COLS && y < ROWS && getchar(x, y) == ' ') {
+  if (x < COLS && y < ROWS && getchar(x, y) == 0) {
     p->dir = dir;
     return 1;
   } else {
@@ -238,7 +204,8 @@ void flash_colliders() {
     //cv_set_attenuation(CV_SOUNDCHANNEL_0, i/2);
     if (players[0].collided) players[0].head_attr ^= 0x80;
     if (players[1].collided) players[1].head_attr ^= 0x80;
-    vdelay(2);
+    vrambuf_flush();
+    vrambuf_flush();
     draw_player(&players[0]);
     draw_player(&players[1]);
   }
@@ -249,7 +216,7 @@ void make_move() {
   byte i;
   for (i=0; i<frames_per_move; i++) {
     human_control(&players[0]);
-    vdelay(1);
+    vrambuf_flush();
   }
   ai_control(&players[0]);
   ai_control(&players[1]);
@@ -263,12 +230,13 @@ void declare_winner(byte winner) {
   clrscr();
   for (i=0; i<ROWS/2-3; i++) {
     draw_box(i,i,COLS-1-i,ROWS-1-i,BOX_CHARS);
-    vdelay(1);
+    vrambuf_flush();
   }
   cputsxy(12,10,"WINNER:");
   cputsxy(12,13,"PLAYER ");
   cputcxy(12+7, 13, '1'+winner);
-  vdelay(75);
+  vrambuf_flush();
+  delay(75);
   gameover = 1;
 }
 
@@ -288,12 +256,13 @@ AE(1,0,1,0),AE(0,0,0,0),AE(0,0,0,0),AE(0,0,0,0), AE(0,0,0,0),AE(0,0,0,0),AE(0,0,
 AE(1,1,1,1),AE(1,1,1,1),AE(1,1,1,1),AE(1,1,1,1), AE(1,1,1,1),AE(1,1,1,1),AE(1,1,1,1),AE(1,1,1,1),
 };
 
-// this is palette data
-const unsigned char Palette_Table[16]={
-  0x02,
-  0x31,0x31,0x31,0x00,
-  0x34,0x34,0x34,0x00,
-  0x39,0x39,0x39,0x00,
+/*{pal:"nes",layout:"nes"}*/
+const unsigned char Palette_Table[16]={ 
+  0x00,
+  0x01,0x28,0x31,0x00,
+  0x04,0x24,0x34,0x00,
+  0x09,0x29,0x39,0x00,
+  0x06,0x26,0x36
 };
 
 // put 8x8 grid of palette entries into the PPU
@@ -305,7 +274,7 @@ void setup_attrib_table() {
 void setup_palette() {
   int i;
   // only set palette entries 0-15 (background only)
-  for (i=0; i<15; i++)
+  for (i=0; i<16; i++)
     pal_col(i, Palette_Table[i] ^ attract);
 }
 
@@ -347,9 +316,9 @@ void play_game() {
 }
 
 void main() {
-  vram_adr(0x0);
-  vram_write((unsigned char*)TILESET, sizeof(TILESET));
   joy_install (joy_static_stddrv);
+  vrambuf_clear();
+  set_vram_update(updbuf);
   while (1) {
     attract = 1;
     play_game();

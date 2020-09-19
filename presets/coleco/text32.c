@@ -1,15 +1,20 @@
 
+/*
+Demonstration of "standard" mode, which is 32 x 24
+characters. Each cell can have its own background and
+foreground color, determined by the character in its
+place. The color table contains 32 bytes, each byte
+controlling the colors of a range of 8 characters.
+For example, the first byte determines colors for
+characters 0-7, the second byte for 8-15, etc.
+*/
+
 #include <cv.h>
 #include <cvu.h>
 
-#define PATTERN		0x0000	// 256*8 = 2048 bytes
-#define IMAGE		0x0800	// 32*24 = 768 bytes
-#define COLOR		0x0b00	// 32 bytes
-#define SPRITE_PATTERNS 0x3800	// 32*32 = 1024 bytes
-#define SPRITES		0x3c00	// 4*32 = 128 bytes
-
-uintptr_t __at(0x6a) font_bitmap_a;
-uintptr_t __at(0x6c) font_bitmap_0;
+#include "common.h"
+//#link "common.c"
+//#link "fonts.s"
 
 void setup_32_column_font() {
   cv_set_screen_mode(CV_SCREENMODE_STANDARD);
@@ -19,14 +24,14 @@ void setup_32_column_font() {
   cv_set_sprite_pattern_table(SPRITE_PATTERNS);
   cv_set_sprite_attribute_table(SPRITES);
   cvu_vmemset(0, 0, 0x4000);
-  cvu_memtovmemcpy(PATTERN, (void *)(font_bitmap_0 - '0'*8), 2048);
+  copy_default_character_set();
   cvu_vmemset(COLOR, 0x36, 8); // set color for chars 0-63
   cvu_vmemset(COLOR+8, 0x06, 32-8); // set chars 63-255
 }
 
 void show_text() {
   cvu_vmemset(IMAGE, '.', 32*24);
-  cvu_memtovmemcpy(IMAGE + 1, "Hello Professor Falken", 22);
+  cvu_memtovmemcpy(IMAGE + 1, "Greetings Professor Falken", 26);
   cv_set_screen_active(true);
 }
 
@@ -35,6 +40,8 @@ void main() {
   setup_32_column_font();
   show_text();
   while (1) {
-    cvu_vmemset(COLOR, i++, 8); // set color for chars 0-63
+    /*
+    cvu_vmemset(COLOR+8, i++, 4); // animate color for chars 64-95
+    */
   }
 }

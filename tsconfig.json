@@ -1,19 +1,23 @@
 {
-    "compilerOptions": {
-        "outDir": "./gen",
-        "allowJs": true,
-        "sourceMap": true,
-        "target": "es5",
-        "lib": [
-            "es2016",
-            "dom"
-        ],
-        "noImplicitThis": false,
-        "noImplicitAny": false,
-        "alwaysStrict": true
+  "files": [],
+  "references": [
+    {
+      "path": "./src/common"
     },
-    "include": [
-        "./src/**/*.ts",
-        "./localForage/typings/*.ts"
-    ]
+    {
+      "path": "./src/machine"
+    },
+    {
+      "path": "./src/platform"
+    },
+    {
+      "path": "./src/ide"
+    },
+    {
+      "path": "./src/worker"
+    },
+    {
+      "path": "./src/tools"
+    }
+  ]
 }

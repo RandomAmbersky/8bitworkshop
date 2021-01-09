@@ -9,8 +9,8 @@
   },
   "license": "GPL-3.0",
   "dependencies": {
-    "chokidar": "^3.4.2",
-    "electron-store": "^6.0.0",
+    "chokidar": "^3.4.3",
+    "electron-store": "^6.0.1",
     "jquery": "^3.5.1",
     "reflect-metadata": "^0.1.13",
     "update-electron-app": "^1.5.0"
@@ -19,16 +19,16 @@
     "@types/bootbox": "^4.4.36",
     "@types/bootstrap": "^3.4.0",
     "@types/file-saver": "^2.0.1",
-    "@types/jquery": "^3.5.1",
-    "@types/node": "^14.6.2",
+    "@types/jquery": "^3.5.5",
+    "@types/node": "^14.14.10",
     "atob": "^2.1.x",
     "bootstrap": "^3.4.1",
     "bootstrap-tourist": "^0.2.1",
     "btoa": "^1.2.x",
     "clipboard": "^2.0.6",
-    "electron": "^9.2.1",
-    "electron-packager": "^15.1.0",
-    "file-saver": "^2.0.2",
+    "electron": "^9.3.5",
+    "electron-packager": "^15.2.0",
+    "file-saver": "^2.0.5",
     "jsdom": "^12.2.0",
     "jsfuzz": "^1.0.14",
     "jszip": "^3.5.0",
@@ -57,7 +57,8 @@
     "test-platforms": "NODE_PATH=$(pwd) mocha --recursive --timeout 60000 test/cli/testplatforms.js",
     "test-profile": "NODE_PATH=$(pwd) mocha --recursive --timeout 60000 --prof test/cli",
     "start": "electron .",
-    "fuzzbasic": "jsfuzz gen/common/basic/fuzz.js ~/basic/corpus/ --versifier false"
+    "fuzzbasic": "jsfuzz gen/common/basic/fuzz.js ~/basic/corpus/ --versifier false",
+    "machine": "node gen/tools/runmachine.js"
   },
   "main": "electron.js",
   "keywords": [

@@ -188,13 +188,18 @@ TODO:
   - no import in workers
   - copy to gen/ directory (allowJs is weird)
 - ca65 line numbers are not aligned with source code
+  - neither are DASM when you change comments
   - segments not read properly
 - Debug Browser
   - more stuff like 7800 display lists
   - don't include start/end line on platforms w/o raster timing
 - BIOS symbols
 - show current tool for file
+- download non-text incbin source file
 
+Probing
+- probe log doesn't start @ reset
+Debug, play then halt cpu doesn't highlight final line
 
 
 WEB WORKER FORMAT

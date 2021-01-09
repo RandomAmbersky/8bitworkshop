@@ -4,7 +4,7 @@
 <head>
 <title>8bitworkshop IDE</title>
 <link rel="manifest" href="manifest.json">
-<meta name="googlebot" content="nosnippet" />
+<meta name="googlebot" content="noindex" />
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="application-name" content="8bitworkshop">
@@ -37,31 +37,6 @@ if (window.location.host.endsWith('8bitworkshop.com')) {
 <script defer src="https://www.gstatic.com/firebasejs/5.11.1/firebase-app.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/5.11.1/firebase-auth.js"></script>
 <script defer src="config.js"></script>
-
-<!-- Sentry error reporting -->
-<script defer
-  src="https://browser.sentry-cdn.com/5.22.3/bundle.tracing.min.js"
-  integrity="sha384-HfEJlGrJtFM0B01Wt4sGzTbxWqLMcMeGAXCbyQyB+iK9BhnDmNAtIGovhekIQOa2"
-  crossorigin="anonymous"
-></script>
-<script defer>
-if (window.location.host.endsWith('8bitworkshop.com')) {
-  Sentry.init({
-    dsn: 'https://bf329df3d1b34afa9f5b5e8ecd80ad11@o320878.ingest.sentry.io/1813925',
-    beforeBreadcrumb(breadcrumb, hint) {
-      if (breadcrumb.category === 'xhr' && typeof breadcrumb.data.url === 'string') {
-        if (breadcrumb.data.url.startsWith('http')) return null; // discard external scripts
-      }
-      return breadcrumb;
-    },
-    beforeSend(event, hint) {
-      const error = hint.originalException;
-      if (error instanceof EmuHalt) return null; // ignore EmuHalt
-      return event;
-    },
-  });
-}
-</script>
 
 </head>
 <body>
@@ -262,9 +237,9 @@ if (window.location.host.endsWith('8bitworkshop.com')) {
 
   <!-- BOOKS menu -->
   <span class="dropdown pull-right">
-    <a class="btn dropdown-toggle hidden-xs toolbarMenuButton" id="booksMenuButton" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+    <a class="btn dropdown-toggle hidden-xs hiddem-sm toolbarMenuButton" id="booksMenuButton" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
       <span class="glyphicon glyphicon-book" aria-hidden="true"></span>
-      Get Books <span class="caret"></span>
+      Books <span class="caret"></span>
     </a>
     <ul class="dropdown-menu dropdown-menu-right" aria-labelledby="booksMenuButton">
       <li>
@@ -294,7 +269,7 @@ if (window.location.host.endsWith('8bitworkshop.com')) {
     </ul>
   </span>
   <!-- 8bitworkshop logo -->
-  <span class="logo-gradient hidden-xs hidden-sm hidden-md pull-right" style="margin-left:auto" onclick="window.open('/','_8bitws');">8bitworkshop</span>
+  <span class="logo-gradient hidden-xs hidden-sm pull-right" style="margin-left:auto" onclick="window.open('/','_8bitws');">8bitworkshop</span>
 
  </div><!-- controls_dynamic -->
 </div><!-- controls_top -->
@@ -634,6 +609,29 @@ $( ".dropdown-submenu" ).click(function(event) {
 
 <script>
   startUI();
+</script>
+
+<!-- Sentry error reporting -->
+<script
+  src="https://browser.sentry-cdn.com/5.29.0/bundle.min.js"
+  integrity="sha384-/dYT/04VSU9ItKRPTkWeVZ0kqRsVh/T/5rNCjzBwpx7sYeeueKgJzGMNXSal3xoo"
+  crossorigin="anonymous"
+></script>
+<script>
+Sentry.init({
+    dsn: 'https://bf329df3d1b34afa9f5b5e8ecd80ad11@o320878.ingest.sentry.io/1813925',
+    beforeBreadcrumb(breadcrumb, hint) {
+      if (breadcrumb.category === 'xhr' && typeof breadcrumb.data.url === 'string') {
+        if (breadcrumb.data.url.startsWith('http')) return null; // discard external scripts
+      }
+      return breadcrumb;
+    },
+    beforeSend(event, hint) {
+      const error = hint.originalException;
+      if (error instanceof EmuHalt) return null; // ignore EmuHalt
+      return event;
+    },
+});
 </script>
 
 </body>

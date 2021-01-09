@@ -82,6 +82,7 @@ var TOOL_TO_SOURCE_STYLE = {
   'inform6': 'inform6',
   'fastbasic': 'fastbasic',
   'basic': 'basic',
+  'silice': 'verilog',
 }
 
 function gaEvent(category:string, action:string, label?:string, value?:string) {
@@ -138,7 +139,7 @@ function requestPersistPermission(interactive: boolean, failureonly: boolean) {
       }
     });
   } else {
-    interactive && alertError("Your browser doesn't support expanding the persistent storage quota. Your edits may not be preserved after closing the page.");
+    interactive && alertError("Your browser may not persist edits after closing the page. Try a different browser.");
   }
 }
 
@@ -179,19 +180,19 @@ function initProject() {
   }
   current_project.callbackBuildResult = (result:WorkerResult) => {
     setCompileOutput(result);
-    refreshWindowList();
   };
   current_project.callbackBuildStatus = (busy:boolean) => {
-    if (busy) {
-      toolbar.addClass("is-busy");
-    } else {
-      toolbar.removeClass("is-busy");
-      toolbar.removeClass("has-errors"); // may be added in next callback
-      projectWindows.setErrors(null);
-      hideErrorAlerts();
-    }
-    $('#compile_spinner').css('visibility', busy ? 'visible' : 'hidden');
+    setBusyStatus(busy);
   };
+}
+
+function setBusyStatus(busy: boolean) {
+  if (busy) {
+    toolbar.addClass("is-busy");
+  } else {
+    toolbar.removeClass("is-busy");
+  }
+  $('#compile_spinner').css('visibility', busy ? 'visible' : 'hidden');
 }
 
 function refreshWindowList() {
@@ -1129,11 +1130,16 @@ function measureBuildTime() {
 
 function setCompileOutput(data: WorkerResult) {
   // errors? mark them in editor
-  if (data.errors && data.errors.length > 0) {
+  if (data && data.errors && data.errors.length > 0) {
     toolbar.addClass("has-errors");
     projectWindows.setErrors(data.errors);
     showErrorAlert(data.errors);
   } else {
+    toolbar.removeClass("has-errors"); // may be added in next callback
+    projectWindows.setErrors(null);
+    hideErrorAlerts();
+    // exit if compile output unchanged
+    if (data == null || data.unchanged) return;
     // process symbol map
     platform.debugSymbols = new DebugSymbols(data.symbolmap, data.debuginfo);
     compparams = data.params;
@@ -1157,6 +1163,7 @@ function setCompileOutput(data: WorkerResult) {
       }
     }
     // update all windows (listings)
+    refreshWindowList();
     projectWindows.refresh(false);
   }
 }
@@ -1383,10 +1390,14 @@ function clearBreakpoint() {
   showDebugInfo();
 }
 
+function resetPlatform() {
+  platform.reset();
+}
+
 function resetAndRun() {
   if (!checkRunReady()) return;
   clearBreakpoint();
-  platform.reset();
+  resetPlatform();
   _resume();
 }
 
@@ -1397,11 +1408,11 @@ function resetAndDebug() {
   if (platform.setupDebug && platform.runEval) { // TODO??
     clearBreakpoint();
     _resume();
-    platform.reset();
+    resetPlatform();
     setupBreakpoint("restart");
     platform.runEval((c) => { return true; }); // break immediately
   } else {
-    platform.reset();
+    resetPlatform();
     _resume();
   }
   if (wasRecording) _enableRecording();
@@ -1469,7 +1480,7 @@ function setWaitProgress(prog : number) {
 var recordingVideo = false;
 function _recordVideo() {
   if (recordingVideo) return;
- loadScript("gif.js/dist/gif.js").then( () => {
+ loadScript("lib/gif.js").then( () => {
   var canvas = $("#emulator").find("canvas")[0] as HTMLElement;
   if (!canvas) {
     alertError("Could not find canvas element to record video!");
@@ -1483,7 +1494,7 @@ function _recordVideo() {
       rotate = 1;
   }
   var gif = new GIF({
-    workerScript: 'gif.js/dist/gif.worker.js',
+    workerScript: 'lib/gif.worker.js',
     workers: 4,
     quality: 10,
     rotate: rotate
@@ -1686,6 +1697,7 @@ function setupDebugControls() {
     uitoolbar.add('ctrl+alt+l', 'Run To Line', 'glyphicon-save', runToCursor).prop('id','dbg_toline');
   }
   uitoolbar.newGroup();
+  uitoolbar.grp.prop('id','xtra_bar');
   // add menu clicks
   $(".dropdown-menu").collapse({toggle: false});
   $("#item_new_file").click(_createNewFile);
@@ -1898,7 +1910,7 @@ function showWelcomeMessage() {
 
 ///////////////////////////////////////////////////
 
-var qs = (function (a : string[]) {
+export var qs = (function (a : string[]) {
     if (!a || a.length == 0)
         return {};
     var b = {};
@@ -1923,10 +1935,16 @@ function globalErrorHandler(msgevent) {
   } else {
     var err = msgevent.error || msgevent.reason;
     if (err != null && err instanceof EmuHalt) {
-      msg = (err && err.message) || msg;
-      showExceptionAsError(err, msg);
+      haltEmulation(err);
     }
   }
+}
+
+export function haltEmulation(err?: EmuHalt) {
+  console.log("haltEmulation");
+  _pause();
+  emulationHalted(err);
+  // TODO: reset platform?
 }
 
 // catch errors
@@ -1957,7 +1975,7 @@ function replaceURLState() {
 function addPageFocusHandlers() {
   var hidden = false;
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState == 'hidden' && platform.isRunning()) {
+    if (document.visibilityState == 'hidden' && platform && platform.isRunning()) {
       _pause();
       hidden = true;
     } else if (document.visibilityState == 'visible' && hidden) {
@@ -1972,10 +1990,13 @@ function addPageFocusHandlers() {
     }
   });
   $(window).on("blur", () => {
-    if (platform.isRunning()) {
+    if (platform && platform.isRunning()) {
       _pause();
       hidden = true;
     }
+  });
+  $(window).on("orientationchange", () => {
+    if (platform && platform.resize) setTimeout(platform.resize.bind(platform), 200);
   });
 }
 
@@ -2041,11 +2062,22 @@ async function startPlatform() {
   await initProject();
   await loadProject(qs['file']);
   setupDebugControls();
-  updateSelector();
   addPageFocusHandlers();
   showInstructions();
-  updateBooksMenu();
+  if (qs['embed']) {
+    hideControlsForEmbed();
+  } else {
+    updateSelector();
+    updateBooksMenu();
+    showWelcomeMessage();
+  }
   revealTopBar();
+}
+
+function hideControlsForEmbed() {
+  $('#dropdownMenuButton').hide();
+  $('#platformsMenuButton').hide();
+  $('#booksMenuButton').hide();
 }
 
 function updateBooksMenu() {
@@ -2061,8 +2093,12 @@ function revealTopBar() {
 
 export function setupSplits() {
   const splitName = 'workspace-split3-' + platform_id;
-  var sizes = [0, 50, 50];
-  if (!platform_id.startsWith('vcs'))
+  var sizes;
+  if (platform_id.startsWith('vcs'))
+    sizes = [0, 50, 50];
+  else if (qs['embed'] || Views.isMobileDevice)
+    sizes = [0, 60, 40];
+  else
     sizes = [12, 44, 44];
   var sizesStr = hasLocalStorage && localStorage.getItem(splitName);
   if (sizesStr) {
@@ -2114,25 +2150,29 @@ function loadImportedURL(url : string) {
 }
 
 async function loadFormDataUpload() {
-  setWaitDialog(true);
+  var ignore = !!qs['ignore'];
+  var force = !!qs['force'];
   for (var i=0; i<20; i++) {
     let path = qs['file'+i+'_name'];
     let dataenc = qs['file'+i+'_data'];
     if (path == null || dataenc == null) break;
-    let value = dataenc;
-    if (qs['file'+i+'_type'] == 'binary') {
-      value = stringToByteArray(atob(value));
-    }
     var olddata = await store.getItem(path);
-    if (!olddata || confirm("Replace existing file '" + path + "'?")) {
-      await store.setItem(path, value); // TODO: alert when replacing?
-      if (i == 0) { qs['file'] = path; } // set main filename
+    if (!(ignore && olddata)) {
+      let value = dataenc;
+      if (qs['file'+i+'_type'] == 'binary') {
+        value = stringToByteArray(atob(value));
+      }
+      if (!olddata || force || confirm("Replace existing file '" + path + "'?")) {
+        await store.setItem(path, value);
+      }
     }
+    if (i == 0) { qs['file'] = path; } // set main filename
     delete qs['file'+i+'_name'];
     delete qs['file'+i+'_data'];
     delete qs['file'+i+'_type'];
   }
-  setWaitDialog(false);
+  delete qs['ignore'];
+  delete qs['force'];
   replaceURLState();
 }
 
@@ -2210,7 +2250,6 @@ async function loadAndStartPlatform() {
     console.log("starting platform", platform_id); // loaded required <platform_id>.js file
     try {
       await startPlatform();
-      showWelcomeMessage();
       document.title = document.title + " [" + platform_id + "] - " + (repo_id?('['+repo_id+'] - '):'') + current_project.mainPath;
     } finally {
       revealTopBar();
@@ -2268,6 +2307,23 @@ redirectToHTTPS();
 
 //// ELECTRON STUFF
 
+export function setTestInput(path: string, data: FileData) {
+  platform.writeFile(path, data);
+}
+
+export function getTestOutput(path: string) : FileData {
+  return platform.readFile(path);
+}
+
+export function getSaveState() {
+  return platform.saveState();
+}
+
+export function emulationHalted(err: EmuHalt) {
+  var msg = (err && err.message) || msg;
+  showExceptionAsError(err, msg);
+}
+
 // get remote file from local fs
 declare var getWorkspaceFile, putWorkspaceFile;
 export function getElectronFile(url:string, success:(text:string|Uint8Array)=>void, datatype:'text'|'arraybuffer') {
@@ -2292,5 +2348,14 @@ function writeOutputROMFile() {
     var suffix = (platform.getROMExtension && platform.getROMExtension(current_output)) 
       || "-" + getBasePlatform(platform_id) + ".bin";
     putWorkspaceFile(`bin/${prefix}${suffix}`, current_output);
+  }
+}
+export function highlightSearch(query: string) { // TODO: filename?
+  var wnd = projectWindows.getActive();
+  if (wnd instanceof Views.SourceEditor) {
+    var sc = wnd.editor.getSearchCursor(query);
+    if (sc.findNext()) {
+      wnd.editor.setSelection(sc.pos.to, sc.pos.from);
+    }
   }
 }

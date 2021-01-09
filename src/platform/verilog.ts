@@ -97,6 +97,9 @@ export function VL_GTES_III(x,lbits,y,lhs,rhs) {
 export function VL_DIV_III(lbits,lhs,rhs) {
     return (((rhs)==0)?0:(lhs)/(rhs)); }
 
+export function VL_MULS_III(lbits,lhs,rhs) {
+    return (((rhs)==0)?0:(lhs)*(rhs)); }
+  
 export function VL_MODDIV_III(lbits,lhs,rhs) {
     return (((rhs)==0)?0:(lhs)%(rhs)); }
 
@@ -120,11 +123,11 @@ export function VL_REDXOR_32(r) {
 export var VL_WRITEF = console.log; // TODO: $write
 
 export function vl_finish(filename,lineno,hier) {
-    console.log("Finished at " + filename + ":" + lineno, hier);
+    if (!vl_finished) console.log("Finished at " + filename + ":" + lineno, hier);
     vl_finished = true;
   }
 export function vl_stop(filename,lineno,hier) {
-    console.log("Stopped at " + filename + ":" + lineno, hier);
+    if (!vl_stopped) console.log("Stopped at " + filename + ":" + lineno, hier);
     vl_stopped = true;
   }
 
@@ -158,6 +161,8 @@ export function VL_READMEM_W(ishex,width,depth,array_lsb,fnwords,filename,memp,s
   for (i=0; i<data.length; i++)
     memp[i] = data[i];
 }
+
+const CYCLES_PER_FILL = 20;
 
 // SIMULATOR BASE
 
@@ -321,24 +326,6 @@ var VerilogPlatform = function(mainElement, options) {
       debugCond = null;
   }
 
-  function shadowText(ctx, txt, x, y) {
-    ctx.shadowColor = "black";
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = -1;
-    ctx.shadowOffsetX = 0;
-    ctx.fillText(txt, x, y);
-    ctx.shadowOffsetY = 1;
-    ctx.shadowOffsetX = 0;
-    ctx.fillText(txt, x, y);
-    ctx.shadowOffsetY = 0;
-    ctx.shadowOffsetX = -1;
-    ctx.fillText(txt, x, y);
-    ctx.shadowOffsetY = 0;
-    ctx.shadowOffsetX = 1;
-    ctx.fillText(txt, x, y);
-    ctx.shadowOffsetX = 0;
-  }
-  
   // inner Platform class
     
  class _VerilogPlatform extends BasePlatform implements WaveformProvider {
@@ -483,7 +470,7 @@ var VerilogPlatform = function(mainElement, options) {
   updateScopeFrame() {
     this.split.setSizes([0,100]); // ensure scope visible
     //this.topdiv.hide();// hide crt
-    var done = this.fillTraceBuffer(32 * trace_signals.length); // TODO: const
+    var done = this.fillTraceBuffer(CYCLES_PER_FILL * trace_signals.length);
     if (done)
       this.pause(); // TODO?
     // TODO
@@ -550,7 +537,8 @@ var VerilogPlatform = function(mainElement, options) {
           if (inspect) {
             inspect_data[frameidx] = inspect_obj[inspect_sym];
           }
-          idata[frameidx] = RGBLOOKUP[gen.rgb & 15];
+          let rgb = gen.rgb;
+          idata[frameidx] = rgb & 0x80000000 ? rgb : RGBLOOKUP[rgb & 15];
           frameidx++;
         }
       } else if (!framehsync && gen.hsync) {
@@ -673,8 +661,12 @@ var VerilogPlatform = function(mainElement, options) {
           const IGNORE_SIGNALS = ['clk','reset'];
           trace_signals = trace_signals.filter((v) => { return IGNORE_SIGNALS.indexOf(v.name)<0; }); // remove clk, reset
           $("#speed_bar").show();
+          $("#run_bar").show();
+          $("#xtra_bar").show();
         } else {
           $("#speed_bar").hide();
+          $("#run_bar").hide();
+          $("#xtra_bar").hide();
         }
       }
     }
@@ -756,19 +748,22 @@ var VerilogPlatform = function(mainElement, options) {
     gen.tick2();
   }
   getToolForFilename(fn) {
-    if (fn.endsWith("asm"))
-      return "jsasm";
-    else
-      return "verilator";
+    if (fn.endsWith(".asm")) return "jsasm";
+    else if (fn.endsWith(".ice")) return "silice";
+    else return "verilator";
   }
   getDefaultExtension() { return ".v"; };
 
   inspect(name:string) : string {
     if (!gen) return;
-    if (name && !name.match(/^\w+$/)) return;
+    if (name) name = name.replace('.','_');
+    if (!name || !name.match(/^\w+$/)) {
+      inspect_obj = inspect_sym = null;
+      return;
+    }
     var val = gen[name];
     if (val === undefined && current_output.code) {
-      var re = new RegExp("(\\w+__DOT__" + name + ")\\b", "gm");
+      var re = new RegExp("(\\w+__DOT__(?:_[dcw]_)" + name + ")\\b", "gm");
       var m = re.exec(current_output.code);
       if (m) {
         name = m[1];
@@ -850,3 +845,4 @@ var VerilogVGAPlatform = function(mainElement, options) {
 
 PLATFORMS['verilog'] = VerilogPlatform;
 PLATFORMS['verilog-vga'] = VerilogVGAPlatform;
+PLATFORMS['verilog-test'] = VerilogPlatform;
